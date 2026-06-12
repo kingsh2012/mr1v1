@@ -1,3 +1,15 @@
 PROCS.PRO-REHLDS-LINUX-PROD/
 PROCS.PRO-REHLDS-STARTUP/
 PROCS.PRO-REHLDS-COLLECTION-SYSTEM/
+server/*
+!server/Dockerfile
+!server/.dockerignore
+!server/docker-compose.yml
+!server/docker-compose.prod.yml
+!server/.env.example
+!server/start.sh
+!server/set_cvar.sh
+!server/config-overrides/
+!server/cstrike/
+server/cstrike/*
+!server/cstrike/server.cfg

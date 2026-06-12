@@ -1,0 +1,14 @@
+services:
+  rehlds:
+    image: registry-vpc.cn-beijing.aliyuncs.com/kingsh2012/rm1v1:v0.2.3
+    container_name: rehlds-1v1
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SERVER_HOSTNAME: ${SERVER_HOSTNAME:-1v1 Test Server}
+      MAXPLAYERS: ${MAXPLAYERS:-10}
+      RCON_PASSWORD: ${RCON_PASSWORD:-test1234}
+      PORT: ${PORT:-27015}
+    volumes:
+      - ./logs/server:/opt/rehlds/cstrike/logs
+      - ./logs/amxmodx:/opt/rehlds/cstrike/addons/amxmodx/logs
