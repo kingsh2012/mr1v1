@@ -22,6 +22,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 赛制设计参照"完美天梯单挑"模式（非PROCS.PRO的5v5赛制），已用实战数据验证过回合/阶段分布。
 
+## 数据采集插件 mr1v1_telemetry.sma
+
+位置：`server/cstrike/addons/amxmodx/scripting/mr1v1_telemetry.sma`（编译产物 `mr1v1_telemetry.amxx`，已在 `configs/plugins.ini` 中注册）。
+
+与 `mr1v1_match.sma` 解耦：通过其广播的自定义forward `mr1v1_match_start(match_id, id0, id1)` / `mr1v1_match_end(...)` 获知比赛上下文，期间收集命中/伤害事件，按固定周期（默认1秒）批量HTTP上报（`mr1v1_combat_batch`，地址复用 `configs/mr1v1.ini` 的 `mr1v1_gateway_http`）。后续计划加入开枪、玩家移动轨迹等事件，复用同一套批量上报机制。
+
 ## 构建与运行
 
 ### AMXModX 插件编译
@@ -93,16 +99,22 @@ AMXModX 日志中的 "GameConfig CRC mismatch" 是因为 AMXModX 不认识最新
 ### 数据流
 ```
 AMXModX 插件 → HTTP POST /record (JSON) → gateway (channel 10000)
-    → MQTT (topic: {prefix}/{token}) → consumer → PostgreSQL
+    → MQTT (topic: {prefix}/{match_id}) → consumer → PostgreSQL
 ```
 gateway 与游戏进程完全异步解耦，AMXModX 插件发完即走，不等响应，避免阻塞单线程游戏引擎。
 
-### 消息格式（pkg/mes/mes.go）
+### 消息格式（AMXX侧已实现，Go侧 pkg/mes/mes.go 待适配）
 所有上报消息使用统一信封：
 ```json
-{ "timestamp": 1700000000, "token": "服务器Token", "type": "消息类型", "version": "插件版本", "data": "JSON字符串" }
+{ "timestamp": 1700000000, "match_id": "比赛唯一ID", "type": "消息类型", "version": "插件版本", "data": { /* 嵌套JSON对象 */ } }
 ```
-`data` 字段为具体结构体序列化后的 JSON 字符串。mr1v1_match.sma 当前上报类型：`mr1v1_match_start` / `mr1v1_round_end` / `mr1v1_match_end`。
+`match_id`取代了原来的服务器级`token`——1v1服务器打完即销毁、一台对应一场比赛，`match_id`本身已是唯一标识，gateway可据此将同一场比赛的事件分流到MQTT topic `{prefix}/{match_id}`。`data`为嵌套JSON对象（非转义字符串）。
+
+上报分两个插件：
+- `mr1v1_match.sma`：`mr1v1_match_start` / `mr1v1_round_end` / `mr1v1_match_end`
+- `mr1v1_telemetry.sma`：`mr1v1_combat_batch`（命中/伤害事件，批量上报；后续会加开枪/移动轨迹等批量事件）
+
+字段详情见 [MR1V1_EVENTS.md](./MR1V1_EVENTS.md)。Go侧（`pkg/mes`、consumer）尚未适配新信封和新事件类型，目前这些消息到达gateway后仍按旧逻辑处理/丢弃。
 
 ### AMXModX 插件版本
 **必须使用 AMXModX 1.10**（非 1.9），因为数据上报使用 JSON 格式，依赖 1.10 的原生 JSON 模块。

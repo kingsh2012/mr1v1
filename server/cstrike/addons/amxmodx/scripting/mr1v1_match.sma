@@ -107,9 +107,9 @@ new HookChain:g_hookAddItem;
 new g_hudSync;
 new g_hudWarmupSync;
 new g_hFwdMatchEnd;
+new g_hFwdMatchStart;
 
 new g_szGatewayHttp[128];
-new g_szGatewayToken[64];
 new g_szMapName[32];
 
 // 比赛唯一ID：每局比赛开始(InitMatch)时生成一次，贯穿该局所有上报事件，
@@ -174,6 +174,9 @@ public plugin_init() {
 	g_hudSync = CreateHudSyncObj();
 	g_hudWarmupSync = CreateHudSyncObj();
 	g_hFwdMatchEnd = CreateMultiForward("mr1v1_match_end", ET_IGNORE, FP_CELL, FP_CELL, FP_CELL, FP_CELL, FP_CELL);
+	// mr1v1_match_start(const match_id[], id0, id1)：比赛开始时广播给其他插件（如mr1v1_telemetry），
+	// id0/id1为对战双方的玩家实体id（与TraceAttack等钩子里的实体id一致，全场比赛期间不变）
+	g_hFwdMatchStart = CreateMultiForward("mr1v1_match_start", ET_IGNORE, FP_STRING, FP_CELL, FP_CELL);
 
 	g_pCvarWarmupTime = create_cvar("mr1v1_warmup_time", "15", .has_min = true, .min_val = 0.0);
 	g_pCvarRoundInfinite = get_cvar_pointer("mp_round_infinite");
@@ -221,13 +224,11 @@ LoadGatewayConfig() {
 
 		if (equali(key, "mr1v1_gateway_http")) {
 			copy(g_szGatewayHttp, charsmax(g_szGatewayHttp), value);
-		} else if (equali(key, "mr1v1_gateway_token")) {
-			copy(g_szGatewayToken, charsmax(g_szGatewayToken), value);
 		}
 	}
 
 	fclose(fh);
-	log_amx("MR1V1: gateway http=[%s] token=[%s]", g_szGatewayHttp, g_szGatewayToken);
+	log_amx("MR1V1: gateway http=[%s]", g_szGatewayHttp);
 }
 
 // ------------------------------------------------------------
@@ -775,6 +776,9 @@ InitMatch(bool:selectPlayers = true) {
 	set_member_game(m_bCompleteReset, true);
 	set_member_game(m_bGameStarted, true);
 	rg_round_end(1.0, WINSTATUS_DRAW, ROUND_GAME_COMMENCE, "");
+
+	new retFwd;
+	ExecuteForward(g_hFwdMatchStart, retFwd, g_szMatchId, g_iPlayer[0], g_iPlayer[1]);
 
 	ReportMatchStart();
 	RefreshVoiceState();
@@ -1409,20 +1413,26 @@ public Task_EnforceSpectators() {
 }
 
 // ------------------------------------------------------------
-// gateway 上报（HTTP POST /record，JSON信封：timestamp/token/type/version/data）
+// gateway 上报（HTTP POST /record，JSON信封：timestamp/match_id/type/version/data）
+// match_id用于gateway按{prefix}/{match_id}分流MQTT topic，
+// 不再使用服务器级token——1v1服务器打完即销毁，match_id本身已是唯一标识
 // ------------------------------------------------------------
 
-ReportEvent(const type[], const data[]) {
+// data为各事件自行构造的JSON对象，归属权转移给本函数：
+// 正常路径下被挂到object下随json_free(object)一起释放；
+// gateway未配置(直接返回)的路径下需要单独释放，避免泄漏
+ReportEvent(const type[], JSON:data) {
 	if (!strlen(g_szGatewayHttp)) {
+		json_free(data);
 		return;
 	}
 
 	new JSON:object = json_init_object();
 	json_object_set_number(object, "timestamp", get_systime());
-	json_object_set_string(object, "token", g_szGatewayToken);
+	json_object_set_string(object, "match_id", g_szMatchId);
 	json_object_set_string(object, "type", type);
 	json_object_set_string(object, "version", PLUGIN_VERSION);
-	json_object_set_string(object, "data", data);
+	json_object_set_value(object, "data", data);
 
 	new payload[1024];
 	json_serial_to_string(object, payload, charsmax(payload));
@@ -1464,11 +1474,7 @@ ReportMatchStart() {
 	json_object_set_string(data, "p1.authid", g_szAuthId[1], true);
 	json_object_set_number(data, "p1.userid", get_user_userid(g_iPlayer[1]), true);
 
-	new buf[512];
-	json_serial_to_string(data, buf, charsmax(buf));
-	json_free(data);
-
-	ReportEvent("mr1v1_match_start", buf);
+	ReportEvent("mr1v1_match_start", data);
 }
 
 ReportRoundEnd(dmg0, hits0, dmg1, hits1) {
@@ -1485,11 +1491,7 @@ ReportRoundEnd(dmg0, hits0, dmg1, hits1) {
 	json_object_set_number(data, "p1.damage", dmg1, true);
 	json_object_set_number(data, "p1.hits", hits1, true);
 
-	new buf[512];
-	json_serial_to_string(data, buf, charsmax(buf));
-	json_free(data);
-
-	ReportEvent("mr1v1_round_end", buf);
+	ReportEvent("mr1v1_round_end", data);
 }
 
 // end_reason: normal(正常打满/提前胜出) / manual_stop(.stop手动停止) /
@@ -1507,9 +1509,5 @@ ReportMatchEnd(winner, const name1[], const name2[], const endReason[]) {
 	json_object_set_string(data, "p1.name", name2, true);
 	json_object_set_string(data, "p1.authid", g_szAuthId[1], true);
 
-	new buf[512];
-	json_serial_to_string(data, buf, charsmax(buf));
-	json_free(data);
-
-	ReportEvent("mr1v1_match_end", buf);
+	ReportEvent("mr1v1_match_end", data);
 }

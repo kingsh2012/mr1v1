@@ -21,6 +21,8 @@ server/cstrike/addons/amxmodx/*
 !server/cstrike/addons/amxmodx/scripting/
 server/cstrike/addons/amxmodx/scripting/*
 !server/cstrike/addons/amxmodx/scripting/mr1v1_match.sma
+!server/cstrike/addons/amxmodx/scripting/mr1v1_telemetry.sma
 !server/cstrike/addons/amxmodx/plugins/
 server/cstrike/addons/amxmodx/plugins/*
 !server/cstrike/addons/amxmodx/plugins/mr1v1_match.amxx
+!server/cstrike/addons/amxmodx/plugins/mr1v1_telemetry.amxx
