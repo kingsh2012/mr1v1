@@ -13,3 +13,14 @@ server/*
 !server/cstrike/
 server/cstrike/*
 !server/cstrike/server.cfg
+!server/cstrike/addons/
+server/cstrike/addons/*
+!server/cstrike/addons/amxmodx/
+server/cstrike/addons/amxmodx/*
+!server/cstrike/addons/amxmodx/configs/
+!server/cstrike/addons/amxmodx/scripting/
+server/cstrike/addons/amxmodx/scripting/*
+!server/cstrike/addons/amxmodx/scripting/mr1v1_match.sma
+!server/cstrike/addons/amxmodx/plugins/
+server/cstrike/addons/amxmodx/plugins/*
+!server/cstrike/addons/amxmodx/plugins/mr1v1_match.amxx
