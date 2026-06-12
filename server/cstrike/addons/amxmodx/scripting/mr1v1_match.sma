@@ -109,6 +109,12 @@ new g_hudWarmupSync;
 new g_hFwdMatchEnd;
 new g_hFwdMatchStart;
 
+// StartWithBot()里临时改过的bot相关cvar，比赛结束(RestoreServerCvars)时恢复成开始前的值
+new bool:g_bBotCvarsModified;
+new g_iBotJoinAfterPlayerOld;
+new g_szBotQuotaModeOld[32];
+new g_iBotDifficultyOld;
+
 new g_szGatewayHttp[128];
 new g_szMapName[32];
 
@@ -150,6 +156,8 @@ public plugin_init() {
 	register_clcmd("say_team .guns", "CmdGuns");
 	register_clcmd("say .stop", "CmdStop");
 	register_clcmd("say_team .stop", "CmdStop");
+	register_clcmd("say .refresh", "CmdRefresh");
+	register_clcmd("say_team .refresh", "CmdRefresh");
 	register_clcmd("say h", "CmdHelp");
 	register_clcmd("say_team h", "CmdHelp");
 	register_clcmd("say", "CmdSay");
@@ -344,6 +352,12 @@ StartWithBot(bool:testMode, const requester) {
 	// 只通过bot_quota+normal模式让引擎自动补Bot(bot_join_after_player=0立即生效)，
 	// 不再额外调用bot_add——经实测bot_quota=N会按队伍各补N个(共2N个)，
 	// 叠加手动bot_add会导致补出的Bot数翻倍
+	// 改之前先记录原值，比赛结束后(RestoreServerCvars)恢复，避免影响下一局/其他用途
+	g_iBotJoinAfterPlayerOld = get_cvar_num("bot_join_after_player");
+	get_cvar_string("bot_quota_mode", g_szBotQuotaModeOld, charsmax(g_szBotQuotaModeOld));
+	g_iBotDifficultyOld = get_cvar_num("bot_difficulty");
+	g_bBotCvarsModified = true;
+
 	set_cvar_num("bot_join_after_player", 0);
 	set_cvar_string("bot_quota_mode", "normal");
 	set_cvar_num("bot_difficulty", 3);
@@ -380,6 +394,18 @@ public CmdStop(const id) {
 	return PLUGIN_HANDLED;
 }
 
+// .refresh：手动刷新服务器（不换图），用于比赛结束后清理残留实体/比分等场景
+public CmdRefresh(const id) {
+	if (g_bMatchActive) {
+		client_print_color(id, print_team_grey, "^4[1v1] ^1比赛进行中，无法刷新服务器");
+		return PLUGIN_HANDLED;
+	}
+
+	client_print_color(0, print_team_grey, "^4[1v1] ^1服务器即将刷新");
+	RefreshServer();
+	return PLUGIN_HANDLED;
+}
+
 public CmdConsoleStop(const id, const level, const cid) {
 	if (!g_bMatchActive) {
 		console_print(id, "[1v1] 当前没有进行中的比赛");
@@ -408,6 +434,7 @@ ShowHelpMenu(const id) {
 		menu_additem(menu, "开始比赛+Bot陪练 (.start_bot)", "start_bot", 0);
 		menu_additem(menu, "测试模式+Bot (.start_bot_test)", "start_bot_test", 0);
 		menu_additem(menu, "切换地图 (.map)", "map", 0);
+		menu_additem(menu, "刷新服务器 (.refresh)", "refresh", 0);
 	} else {
 		if (!g_bWarmupActive && IsMatchPlayer(id)) {
 			menu_additem(menu, "选择武器 (.guns)", "guns", 0);
@@ -440,6 +467,8 @@ public HelpMenuHandler(const id, menu, item) {
 		ShowGunsMenu(id);
 	} else if (equal(action, "stop")) {
 		CmdStop(id);
+	} else if (equal(action, "refresh")) {
+		CmdRefresh(id);
 	}
 
 	return PLUGIN_HANDLED;
@@ -1216,12 +1245,15 @@ AnnounceMatchResult() {
 		winner = 1;
 	}
 
+	set_hudmessage(0, 255, 0, -1.0, 0.35, 0, 6.0, 6.0);
 	if (winner == -1) {
 		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！平局%d:%d", g_iWins[0], g_iWins[1]);
+		ShowSyncHudMsg(0, g_hudSync, "比赛结束！平局 %d:%d", g_iWins[0], g_iWins[1]);
 	} else {
 		new winnerName[32];
 		get_user_name(g_iPlayer[winner], winnerName, charsmax(winnerName));
 		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！%s获胜！比分%d:%d", winnerName, g_iWins[0], g_iWins[1]);
+		ShowSyncHudMsg(0, g_hudSync, "比赛结束！%s 获胜 %d:%d", winnerName, g_iWins[0], g_iWins[1]);
 
 		new loser = 1 - winner;
 		client_print_color(g_iPlayer[loser], print_team_grey, "^4[1v1] ^1很遗憾你失败了，别气馁，再来一把干回来！");
@@ -1256,6 +1288,14 @@ RestoreServerCvars() {
 		set_pcvar_num(g_pCvarForceRespawn, g_iForceRespawnOld);
 		set_pcvar_float(g_pCvarRespawnImmunity, g_flRespawnImmunityOld);
 		g_bWarmupActive = false;
+	}
+
+	// StartWithBot()改过的bot相关cvar恢复成开始前的值（bot_quota本身在ResetMatchState里清零）
+	if (g_bBotCvarsModified) {
+		set_cvar_num("bot_join_after_player", g_iBotJoinAfterPlayerOld);
+		set_cvar_string("bot_quota_mode", g_szBotQuotaModeOld);
+		set_cvar_num("bot_difficulty", g_iBotDifficultyOld);
+		g_bBotCvarsModified = false;
 	}
 }
 
@@ -1295,9 +1335,14 @@ ResetMatchState() {
 	set_cvar_num("bot_quota", 0);
 	KickAllBots();
 
-	// 不换图，仅用引擎自带的 mp_restartgame 重启当前回合，
-	// 清空残留实体/掉落武器/比分显示，恢复到干净的初始状态
-	set_cvar_num("mp_restartgame", 1);
+	RefreshServer();
+}
+
+// 不换图刷新服务器：清空残留实体/掉落武器/比分显示，恢复到干净的初始状态
+// 参照PROCS.PRO的Cmp_Server_RestartRound实现
+RefreshServer() {
+	server_cmd("sv_restartround 1");
+	server_exec();
 }
 
 // 踢出所有Bot（.stop / 中止比赛时清理比赛用Bot）
