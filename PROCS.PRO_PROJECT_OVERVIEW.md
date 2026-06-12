@@ -85,6 +85,10 @@
 **支持双架构（Linux + Windows）：**
 同一份仓库同时包含 Linux `.so` 和 Windows `.dll`，可在两个平台运行。
 
+**插件注册：**
+- Metamod-R 作为插件加载器，`.so` 插件在 `cstrike/addons/metamod/plugins.pro.ini` 中注册
+- AMXModX 插件在 `cstrike/addons/amxmodx/configs/plugins.ini` 中注册
+
 **游戏模式（通过 hlds_mode 切换）：**
 | 模式 | 数据采集 | 玩家验证 | 自动改名 |
 |------|---------|---------|---------|
@@ -140,6 +144,28 @@ mystats_recoil_mode: 0/1/2        # 后坐力控制模式
 
 **与上层平台交互：**
 WebSocket 客户端连接到平台后端，定期上报宿主机状态（`HostInfo` 结构体）。注：当前 v2 分支中 WebSocket 功能已在 `main.go` 中注释掉，未启用。
+
+**构建与运行：**
+```bash
+cd PROCS.PRO-REHLDS-STARTUP
+
+# 直接运行（配置文件默认 rehlds-startup.yml）
+go run main.go -conf rehlds-startup.yml
+
+# 容器模式启动
+go run main.go -conf rehlds-startup.yml -docker
+
+# 初始化服务端文件（首次部署时执行）
+go run main.go -conf rehlds-startup.yml -init
+
+# 调试模式
+go run main.go -conf rehlds-startup.yml -debug
+
+# 运行测试
+go test ./...
+go test ./hlds/...
+go test ./config/...
+```
 
 ---
 
