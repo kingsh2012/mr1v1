@@ -30,9 +30,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 编译需要 AMXModX **1.10** 编译器（`amxxpc`），输出 `.amxx` 放到 `../plugins/` 目录。
 
 ```bash
-# Linux 编译示例
-./amxxpc mr1v1_match.sma -o ../plugins/mr1v1_match.amxx
+# Linux 编译示例：-o 后接的输出路径不能含 ".."（amxxpc 1.10.0.5476 在打包.amxx时
+# 路径里有".."会算错输出文件名导致"Could not locate output file"，详见下方注意事项），
+# 所以先在 scripting/ 目录内编译，再移动到 ../plugins/
+./amxxpc mr1v1_match.sma -omr1v1_match
+mv -f mr1v1_match.amxx ../plugins/mr1v1_match.amxx
 ```
+
+**`-o` 参数注意事项：**`-o<name>` 是"set base name of output file"，必须与 `-o` **不留空格**直接拼接，且 `<name>` 不能含路径分隔符跳转（如 `../`），否则amxxpc打包`.amxx`的最后一步会输出"Could not locate output file"且不生成`.amxx`（pawncc本身可能已编译成功但不会被打包）。
 
 ### 消费端（PROCS.PRO-REHLDS-COLLECTION-SYSTEM）
 

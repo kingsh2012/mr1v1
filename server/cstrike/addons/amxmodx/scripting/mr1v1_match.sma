@@ -16,8 +16,10 @@
 //   - 启动方式：聊天 .start，或后台RCON执行 mr1v1_start
 //   - 停止比赛：聊天 .stop，或后台RCON执行 mr1v1_stop
 //   - 换图：聊天 .map 弹出内置1v1地图菜单，或 .map <地图名> 直接指定（比赛进行中无法换图），3秒后切换
+//   - 聊天框输入 h 弹出命令菜单（按当前比赛状态显示.start/.start_bot/.start_bot_test/.map
+//     或.guns/.stop），免去记忆具体指令
 //   - 比赛进行中加入的第三人自动设为观察者
-//   - 对战玩家掉线后30秒内重连(SteamID匹配)可恢复比赛，超时则自动取消
+//   - 对战玩家掉线后60秒内重连(SteamID匹配)可恢复比赛，超时则自动取消
 //   - 比赛开始/每回合结束/比赛结束 通过 HTTP POST 上报到 gateway（见 configs/mr1v1.ini）
 // ============================================================
 
@@ -84,6 +86,7 @@ new TeamName:g_eCurrentTeam[2];
 new g_iWins[2];
 new g_iWeaponChoice[MAX_PLAYERS + 1][3];
 new g_szAuthId[2][35];
+new g_szPlayerName[2][32];
 new bool:g_bPendingReconnect[2];
 new g_iLastRoundNum;
 new MatchPhase:g_eLastPhase;
@@ -147,6 +150,8 @@ public plugin_init() {
 	register_clcmd("say_team .guns", "CmdGuns");
 	register_clcmd("say .stop", "CmdStop");
 	register_clcmd("say_team .stop", "CmdStop");
+	register_clcmd("say h", "CmdHelp");
+	register_clcmd("say_team h", "CmdHelp");
 	register_clcmd("say", "CmdSay");
 	register_clcmd("say_team", "CmdSay");
 
@@ -288,8 +293,8 @@ public CmdConsoleStart(const id, const level, const cid) {
 	return PLUGIN_HANDLED;
 }
 
-public CmdStartBot(const id) { StartWithBot(false); return PLUGIN_HANDLED; }
-public CmdStartBotTest(const id) { StartWithBot(true); return PLUGIN_HANDLED; }
+public CmdStartBot(const id) { StartWithBot(false, GetMatchRequester(id)); return PLUGIN_HANDLED; }
+public CmdStartBotTest(const id) { StartWithBot(true, GetMatchRequester(id)); return PLUGIN_HANDLED; }
 
 public CmdConsoleStartBotTest(const id, const level, const cid) {
 	if (g_bMatchActive) {
@@ -297,14 +302,22 @@ public CmdConsoleStartBotTest(const id, const level, const cid) {
 		return PLUGIN_HANDLED;
 	}
 
-	StartWithBot(true);
+	StartWithBot(true, 0);
 	return PLUGIN_HANDLED;
 }
 
-// 真人优先级最高：仅当前只有1名真人时才补一个专家难度(最高智商)Bot陪练；
-// 真人数>=2时忽略Bot，直接走正常流程(.start一致)
+// 判断发起.start_bot/.start_bot_test的玩家是否已加入T/CT；
+// 若其还是观察者(未选边)，返回0交给StartWithBot视为"无人参赛"，改为补2个Bot对战
+GetMatchRequester(const id) {
+	new TeamName:team = get_member(id, m_iTeam);
+	return (team == TEAM_TERRORIST || team == TEAM_CT) ? id : 0;
+}
+
+// .start_bot/.start_bot_test：先清空场上所有旧Bot，再凑够2人对战——
+// requester==0(无真人，或发起者本身是观察者)：补2个Bot互打，其余真人均设为观察者；
+// requester为已在T/CT的真人：该玩家留下对战，其余真人设为观察者，补1个专家难度Bot陪练；
 // testMode=true 时会缩短回合时间/冻结时间，方便快速跑完比赛做测试
-StartWithBot(bool:testMode) {
+StartWithBot(bool:testMode, const requester) {
 	if (g_bMatchActive) {
 		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛已经在进行中");
 		return;
@@ -312,26 +325,31 @@ StartWithBot(bool:testMode) {
 
 	g_bTestMode = testMode;
 
+	// 先清零bot_quota并踢掉所有旧Bot，避免遗留Bot干扰人数统计和选人
+	set_cvar_num("bot_quota", 0);
+	KickAllBots();
+
 	new humans[MAX_PLAYERS], numHumans;
 	get_players(humans, numHumans, "ch"); // 排除Bot和HLTV，仅统计真人
 
-	if (numHumans == 1) {
-		set_cvar_num("bot_join_after_player", 0);
-		set_cvar_string("bot_quota_mode", "normal");
-		set_cvar_num("bot_difficulty", 3);
-		set_cvar_num("bot_quota", 1);
-		server_cmd("bot_add");
-
-		client_print_color(0, print_team_grey, "^4[1v1] ^1已添加专家难度Bot，准备开始比赛...");
-		set_task(1.5, "Task_StartMatch");
-		return;
+	new botsNeeded = (numHumans == 0 || requester == 0) ? 2 : 1;
+	for (new i = 0; i < numHumans; i++) {
+		if (humans[i] != requester && get_member(humans[i], m_iTeam) != TEAM_SPECTATOR) {
+			rg_set_user_team(humans[i], TEAM_SPECTATOR, MODEL_AUTO, true, false);
+			client_print_color(humans[i], print_team_grey, "^4[1v1] ^1比赛进行中，你已被设为观察者，请等待本局结束");
+		}
 	}
 
-	if (testMode) {
-		InitMatch();
-	} else {
-		StartWarmup();
-	}
+	// 只通过bot_quota+normal模式让引擎自动补Bot(bot_join_after_player=0立即生效)，
+	// 不再额外调用bot_add——经实测bot_quota=N会按队伍各补N个(共2N个)，
+	// 叠加手动bot_add会导致补出的Bot数翻倍
+	set_cvar_num("bot_join_after_player", 0);
+	set_cvar_string("bot_quota_mode", "normal");
+	set_cvar_num("bot_difficulty", 3);
+	set_cvar_num("bot_quota", botsNeeded);
+
+	client_print_color(0, print_team_grey, "^4[1v1] ^1已添加%d个专家难度Bot，准备开始比赛...", botsNeeded);
+	set_task(1.5, "Task_StartMatch");
 }
 
 public Task_StartMatch() {
@@ -357,7 +375,7 @@ public CmdStop(const id) {
 		return PLUGIN_HANDLED;
 	}
 
-	AbortMatch("比赛已被停止");
+	AbortMatch("比赛已被停止", "manual_stop");
 	return PLUGIN_HANDLED;
 }
 
@@ -367,7 +385,62 @@ public CmdConsoleStop(const id, const level, const cid) {
 		return PLUGIN_HANDLED;
 	}
 
-	AbortMatch("比赛已被停止");
+	AbortMatch("比赛已被停止", "manual_stop");
+	return PLUGIN_HANDLED;
+}
+
+// ------------------------------------------------------------
+// 命令菜单（聊天框输入 h 唤起）
+// ------------------------------------------------------------
+
+// h：根据当前比赛状态弹出对应的命令菜单，避免玩家记不住.start/.stop/.guns等聊天指令
+public CmdHelp(const id) {
+	ShowHelpMenu(id);
+	return PLUGIN_HANDLED;
+}
+
+ShowHelpMenu(const id) {
+	new menu = menu_create("\y[1v1] 命令菜单", "HelpMenuHandler");
+
+	if (!g_bMatchActive) {
+		menu_additem(menu, "开始比赛 (.start)", "start", 0);
+		menu_additem(menu, "开始比赛+Bot陪练 (.start_bot)", "start_bot", 0);
+		menu_additem(menu, "测试模式+Bot (.start_bot_test)", "start_bot_test", 0);
+		menu_additem(menu, "切换地图 (.map)", "map", 0);
+	} else {
+		if (!g_bWarmupActive && IsMatchPlayer(id)) {
+			menu_additem(menu, "选择武器 (.guns)", "guns", 0);
+		}
+		menu_additem(menu, "停止比赛 (.stop)", "stop", 0);
+	}
+
+	menu_display(id, menu, 0);
+}
+
+public HelpMenuHandler(const id, menu, item) {
+	if (item == MENU_EXIT) {
+		menu_destroy(menu);
+		return PLUGIN_HANDLED;
+	}
+
+	new access, callback, action[20], dispName[64];
+	menu_item_getinfo(menu, item, access, action, charsmax(action), dispName, charsmax(dispName), callback);
+	menu_destroy(menu);
+
+	if (equal(action, "start")) {
+		CmdStart(id);
+	} else if (equal(action, "start_bot")) {
+		CmdStartBot(id);
+	} else if (equal(action, "start_bot_test")) {
+		CmdStartBotTest(id);
+	} else if (equal(action, "map")) {
+		ShowMapMenu(id);
+	} else if (equal(action, "guns")) {
+		ShowGunsMenu(id);
+	} else if (equal(action, "stop")) {
+		CmdStop(id);
+	}
+
 	return PLUGIN_HANDLED;
 }
 
@@ -570,6 +643,11 @@ EquipPlayerForWarmup(const id) {
 // 比赛流程
 // ------------------------------------------------------------
 
+// 为Bot生成唯一ID(BOT_<userid>_<随机数>)，替代固定的"BOT"，避免上报数据中authid冲突
+GenerateBotAuthId(id, buf[], len) {
+	formatex(buf, len, "BOT_%d_%06d", get_user_userid(id), random_num(0, 999999));
+}
+
 // 选定本局对战的两名玩家：仅从已加入T/CT的玩家中随机抽取两人，
 // 仍在选队菜单(TEAM_UNASSIGNED)或已是观察者的玩家不参与抽取，多余玩家强制设为观察者
 // 设置 g_iPlayer/g_szAuthId/g_eCurrentTeam，并重置武器选择记忆
@@ -613,9 +691,20 @@ bool:SelectMatchPlayers() {
 	get_user_authid(g_iPlayer[0], g_szAuthId[0], charsmax(g_szAuthId[]));
 	get_user_authid(g_iPlayer[1], g_szAuthId[1], charsmax(g_szAuthId[]));
 
+	// Bot的get_user_authid固定返回"BOT"，多个Bot对局会冲突，
+	// 生成形如 BOT_<userid>_<随机数> 的唯一ID替代，仅用于上报区分
+	if (is_user_bot(g_iPlayer[0])) {
+		GenerateBotAuthId(g_iPlayer[0], g_szAuthId[0], charsmax(g_szAuthId[]));
+	}
+	if (is_user_bot(g_iPlayer[1])) {
+		GenerateBotAuthId(g_iPlayer[1], g_szAuthId[1], charsmax(g_szAuthId[]));
+	}
+
 	new selName0[32], selName1[32];
 	get_user_name(g_iPlayer[0], selName0, charsmax(selName0));
 	get_user_name(g_iPlayer[1], selName1, charsmax(selName1));
+	copy(g_szPlayerName[0], charsmax(g_szPlayerName[]), selName0);
+	copy(g_szPlayerName[1], charsmax(g_szPlayerName[]), selName1);
 	log_amx("MR1V1_SELECT_RESULT p0=%d(%s,%s) p1=%d(%s,%s)",
 		g_iPlayer[0], selName0, g_szAuthId[0], g_iPlayer[1], selName1, g_szAuthId[1]);
 
@@ -650,6 +739,7 @@ AnnounceMatchRules() {
 	client_print_color(0, print_team_grey, "^4[1v1] ^1本场比赛决胜方式：10手枪、28步枪、13狙击，共51回合26胜");
 	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入.guns唤起武器选择菜单，或直接输入下面.1 .2 .3可快速切枪");
 	client_print_color(0, print_team_grey, "^4[1v1] ^1手枪局:.1=USP(默认) .2=格洛克 .3=沙漠之鹰");
+	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入h可随时弹出命令菜单");
 }
 
 InitMatch(bool:selectPlayers = true) {
@@ -1140,7 +1230,7 @@ AnnounceMatchResult() {
 	ExecuteForward(g_hFwdMatchEnd, ret, winner, g_iWins[0], g_iWins[1],
 		get_user_userid(g_iPlayer[0]), get_user_userid(g_iPlayer[1]));
 
-	ReportMatchEnd(winner, name1, name2);
+	ReportMatchEnd(winner, name1, name2, "normal");
 
 	RestoreServerCvars();
 	g_bMatchActive = false;
@@ -1167,9 +1257,12 @@ RestoreServerCvars() {
 
 // 中止比赛并恢复服务器状态（.stop / 掉线超时 / Bot掉线 等场景共用）：
 // 移除比赛Bot、清空比分/回合/阶段等状态，并刷新地图让服务器回到干净的初始状态
-AbortMatch(const reason[]) {
+// endReason为上报用的机器可读原因：manual_stop / disconnect / disconnect_timeout
+AbortMatch(const reason[], const endReason[]) {
 	client_print_color(0, print_team_grey, "^4[1v1] ^1%s，服务器即将刷新", reason);
-	log_amx("MR1V1_MATCH_ABORT reason=%s", reason);
+	log_amx("MR1V1_MATCH_ABORT reason=%s end_reason=%s", reason, endReason);
+
+	ReportMatchEnd(-1, g_szPlayerName[0], g_szPlayerName[1], endReason);
 
 	RestoreServerCvars();
 	g_bMatchActive = false;
@@ -1226,20 +1319,20 @@ public client_disconnected(id, bool:drop, message[], maxlen) {
 
 	// Bot没有"重连"概念，直接中止比赛
 	if (equal(g_szAuthId[slot], "BOT")) {
-		AbortMatch("玩家掉线，比赛已取消");
+		AbortMatch("玩家掉线，比赛已取消", "disconnect");
 		return;
 	}
 
 	g_bPendingReconnect[slot] = true;
-	client_print_color(0, print_team_grey, "^4[1v1] ^1玩家掉线，等待30秒重连，比赛暂不取消");
+	client_print_color(0, print_team_grey, "^4[1v1] ^1玩家掉线，等待60秒重连，比赛暂不取消");
 	log_amx("MR1V1_MATCH_PLAYER_DROP slot=%d authid=%s", slot, g_szAuthId[slot]);
-	set_task(30.0, "Task_AbortIfNoReconnect", slot + 1000);
+	set_task(60.0, "Task_AbortIfNoReconnect", slot + 1000);
 }
 
 public Task_AbortIfNoReconnect(slotPlus) {
 	new slot = slotPlus - 1000;
 	if (g_bMatchActive && g_bPendingReconnect[slot]) {
-		AbortMatch("玩家掉线超时未重连，比赛已取消");
+		AbortMatch("玩家掉线超时未重连，比赛已取消", "disconnect_timeout");
 	}
 }
 
@@ -1399,10 +1492,13 @@ ReportRoundEnd(dmg0, hits0, dmg1, hits1) {
 	ReportEvent("mr1v1_round_end", buf);
 }
 
-ReportMatchEnd(winner, const name1[], const name2[]) {
+// end_reason: normal(正常打满/提前胜出) / manual_stop(.stop手动停止) /
+// disconnect(玩家掉线立即取消) / disconnect_timeout(玩家掉线超时未重连)
+ReportMatchEnd(winner, const name1[], const name2[], const endReason[]) {
 	new JSON:data = json_init_object();
 
 	json_object_set_string(data, "match_id", g_szMatchId);
+	json_object_set_string(data, "end_reason", endReason);
 	json_object_set_number(data, "winner_slot", winner);
 	json_object_set_number(data, "wins0", g_iWins[0]);
 	json_object_set_number(data, "wins1", g_iWins[1]);
