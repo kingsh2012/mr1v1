@@ -158,6 +158,8 @@ public plugin_init() {
 	register_clcmd("say_team .stop", "CmdStop");
 	register_clcmd("say .refresh", "CmdRefresh");
 	register_clcmd("say_team .refresh", "CmdRefresh");
+	register_clcmd("say .hardreset", "CmdHardReset");
+	register_clcmd("say_team .hardreset", "CmdHardReset");
 	register_clcmd("say h", "CmdHelp");
 	register_clcmd("say_team h", "CmdHelp");
 	register_clcmd("say", "CmdSay");
@@ -197,6 +199,9 @@ public plugin_init() {
 	// 部分地图自带武器/弹药拾取物（如 ak47_m4a1_dust），持续清除（含拾取后重新生成的情况），
 	// 避免与按阶段强制重发装备的规则冲突，同时不让玩家看到地图自带枪械模型
 	set_task(2.0, "Task_RemoveMapWeapons", _, _, _, "b");
+
+	// 每日定时硬重启（容器时区为Asia/Shanghai，见Dockerfile），首次延迟到下一个5点触发
+	set_task(float(SecondsUntilNextDailyRestart()), "Task_DailyRestart");
 }
 
 // ------------------------------------------------------------
@@ -406,6 +411,58 @@ public CmdRefresh(const id) {
 	return PLUGIN_HANDLED;
 }
 
+// .hardreset：硬重启服务器进程（quit），依赖docker的restart:unless-stopped自动拉起，
+// 用于sv_restartround无法解决的卡死/异常状态。参照PROCS.PRO的Cmp_Quit实现
+public CmdHardReset(const id) {
+	if (g_bMatchActive) {
+		client_print_color(id, print_team_grey, "^4[1v1] ^1比赛进行中，无法硬重启服务器，请先.stop");
+		return PLUGIN_HANDLED;
+	}
+
+	client_print_color(0, print_team_grey, "^4[1v1] ^1服务器即将硬重启，约几秒后自动恢复");
+	set_task(1.0, "DoHardReset");
+	return PLUGIN_HANDLED;
+}
+
+public DoHardReset() {
+	server_cmd("quit");
+	server_exec();
+}
+
+// 每天硬重启的目标时间点（容器时区为Asia/Shanghai，见Dockerfile）
+const MR1V1_DAILY_RESTART_HOUR = 5;
+
+// 计算距离下一个目标时间点（今天或明天的MR1V1_DAILY_RESTART_HOUR:00:00）还有多少秒
+SecondsUntilNextDailyRestart() {
+	new szHour[3], szMin[3], szSec[3];
+	get_time("%H", szHour, charsmax(szHour));
+	get_time("%M", szMin, charsmax(szMin));
+	get_time("%S", szSec, charsmax(szSec));
+
+	new curSec = str_to_num(szHour) * 3600 + str_to_num(szMin) * 60 + str_to_num(szSec);
+	new targetSec = MR1V1_DAILY_RESTART_HOUR * 3600;
+
+	new delay = targetSec - curSec;
+	if (delay <= 0) {
+		delay += 86400;
+	}
+	return delay;
+}
+
+// 每日定时硬重启：比赛进行中则推迟5分钟重新检查，避免打断比赛；
+// 重启后插件重新加载，plugin_init会重新计算下一次的延迟，不需要在此处重新set_task
+public Task_DailyRestart() {
+	if (g_bMatchActive) {
+		log_amx("MR1V1_DAILY_RESTART_POSTPONED match_active=1");
+		set_task(300.0, "Task_DailyRestart");
+		return;
+	}
+
+	client_print_color(0, print_team_grey, "^4[1v1] ^1服务器每日定时重启，约几秒后自动恢复");
+	log_amx("MR1V1_DAILY_RESTART");
+	set_task(1.0, "DoHardReset");
+}
+
 public CmdConsoleStop(const id, const level, const cid) {
 	if (!g_bMatchActive) {
 		console_print(id, "[1v1] 当前没有进行中的比赛");
@@ -435,6 +492,7 @@ ShowHelpMenu(const id) {
 		menu_additem(menu, "测试模式+Bot (.start_bot_test)", "start_bot_test", 0);
 		menu_additem(menu, "切换地图 (.map)", "map", 0);
 		menu_additem(menu, "刷新服务器 (.refresh)", "refresh", 0);
+		menu_additem(menu, "硬重启服务器 (.hardreset)", "hardreset", 0);
 	} else {
 		if (!g_bWarmupActive && IsMatchPlayer(id)) {
 			menu_additem(menu, "选择武器 (.guns)", "guns", 0);
@@ -469,6 +527,8 @@ public HelpMenuHandler(const id, menu, item) {
 		CmdStop(id);
 	} else if (equal(action, "refresh")) {
 		CmdRefresh(id);
+	} else if (equal(action, "hardreset")) {
+		CmdHardReset(id);
 	}
 
 	return PLUGIN_HANDLED;
@@ -498,7 +558,8 @@ public CmdSay(const id) {
 	} else if (equal(text, ".map ", 5)) {
 		CmdMap(id, text[5]);
 	} else if (strlen(text) && text[0] == '.' && !equal(text, ".start") && !equal(text, ".start_bot")
-		&& !equal(text, ".start_bot_test") && !equal(text, ".stop")
+		&& !equal(text, ".start_bot_test") && !equal(text, ".stop") && !equal(text, ".refresh")
+		&& !equal(text, ".hardreset")
 		&& !equal(text, ".1") && !equal(text, ".2") && !equal(text, ".3") && !equal(text, ".4")
 		&& !equal(text, ".guns")) {
 		// 调试：记录无法识别的"."开头指令，便于排查玩家输入但插件未响应的情况
@@ -766,9 +827,9 @@ bool:SelectMatchPlayers() {
 
 // 比赛开始时一次性公示规则：回合机制 + 各阶段武器选择
 AnnounceMatchRules() {
-	client_print_color(0, print_team_grey, "^4[1v1] ^1本场比赛决胜方式：10手枪、28步枪、13狙击，共51回合26胜");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入.guns唤起武器选择菜单，或直接输入下面.1 .2 .3可快速切枪");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1手枪局:.1=USP(默认) .2=格洛克 .3=沙漠之鹰");
+	client_print_color(0, print_team_red, "^4[1v1] ^1本场比赛决胜方式：10手枪、28步枪、13狙击，^3共51回合26胜");
+	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入^4.guns^1唤起武器选择菜单，或直接输入下面.1 .2 .3可快速切枪");
+	client_print_color(0, print_team_grey, "^4[1v1] ^1手枪局:^4.1^1=USP(默认) ^4.2^1=格洛克 ^4.3^1=沙漠之鹰");
 	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入h可随时弹出命令菜单");
 }
 
@@ -1178,9 +1239,9 @@ AdvancePhaseIfNeeded() {
 
 		new const phaseNames[][] = {"手枪局", "步枪局", "狙击局"};
 		new const phaseWeaponInfo[][] = {
-			".1=USP(默认) .2=格洛克 .3=沙漠之鹰",
-			".1=AK47(默认) .2=M4A1 .3=法玛斯 .4=加利尔",
-			".1=AWP(默认) .2=鸟狙"
+			"^4.1^1=USP(默认) ^4.2^1=格洛克 ^4.3^1=沙漠之鹰",
+			"^4.1^1=AK47(默认) ^4.2^1=M4A1 ^4.3^1=法玛斯 ^4.4^1=加利尔",
+			"^4.1^1=AWP(默认) ^4.2^1=鸟狙"
 		};
 		client_print_color(0, print_team_grey, "^4[1v1] ^1%s:%s", phaseNames[_:g_ePhase], phaseWeaponInfo[_:g_ePhase]);
 		log_amx("MR1V1_PHASE_CHANGE round=%d new_phase=%d", g_iRoundNum, _:g_ePhase);
