@@ -121,10 +121,10 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	case agentproto.StateError:
 		newState = "error"
 	case agentproto.StateStopped:
-		// 只在非 finished 状态下才更新为 error
+		// 只有意外停止才标 error；finished/terminated/error 已是终态不覆盖
 		b.pool.Exec(context.Background(),
 			`UPDATE mr1v1_match SET state='error', update_time=NOW()
-			 WHERE match_id=$1 AND state NOT IN ('finished','error')`,
+			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','error')`,
 			status.MatchID)
 		return
 	default:
@@ -369,6 +369,10 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
+
+	// 平台主动终止 → terminated（不参与结算），区别于正常 finished 和意外 error
+	b.pool.Exec(r.Context(),
+		`UPDATE mr1v1_match SET state='terminated', update_time=NOW() WHERE match_id=$1`, matchID)
 
 	slog.Info("dispatched destroy command", "match_id", matchID, "force", force, "agent", agentUUID)
 	w.Header().Set("Content-Type", "application/json")

@@ -23,19 +23,21 @@ interface Match {
 }
 
 const STATE_COLOR: Record<string, string> = {
-  creating:  'processing',
-  waiting:   'warning',
-  playing:   'success',
-  finished:  'default',
-  error:     'error',
+  creating:   'processing',
+  waiting:    'warning',
+  playing:    'success',
+  finished:   'default',
+  terminated: 'orange',
+  error:      'error',
 }
 
 const STATE_LABEL: Record<string, string> = {
-  creating:  '创建中',
-  waiting:   '等待玩家',
-  playing:   '比赛进行中',
-  finished:  '已结束',
-  error:     '异常',
+  creating:   '创建中',
+  waiting:    '等待玩家',
+  playing:    '比赛进行中',
+  finished:   '正常结束',
+  terminated: '平台终止',
+  error:      '异常',
 }
 
 const ACTIVE_STATES = new Set(['creating', 'waiting', 'playing'])
