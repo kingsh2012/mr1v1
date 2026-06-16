@@ -6,10 +6,13 @@ package dockerctl
 import (
 	"context"
 	"fmt"
+	"io"
+	"log/slog"
 	"time"
 
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
+	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/client"
 )
 
@@ -78,6 +81,10 @@ func (c *Client) CreateAndStart(ctx context.Context, spec Spec) (string, error) 
 		"RCON_PASSWORD=" + spec.RCONPassword,
 	}
 
+	if err := c.ensureImage(ctx, spec.Image); err != nil {
+		return "", fmt.Errorf("pull image %s: %w", spec.Image, err)
+	}
+
 	resp, err := c.cli.ContainerCreate(ctx,
 		&container.Config{
 			Image:  spec.Image,
@@ -97,6 +104,24 @@ func (c *Client) CreateAndStart(ctx context.Context, spec Spec) (string, error) 
 		return "", fmt.Errorf("start container %s for match %s: %w", resp.ID, spec.MatchID, err)
 	}
 	return resp.ID, nil
+}
+
+// ensureImage pulls the image if it is not already present locally.
+// It discards the pull output stream but logs progress at INFO level.
+func (c *Client) ensureImage(ctx context.Context, ref string) error {
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, ref)
+	if err == nil {
+		return nil // already present
+	}
+	slog.Info("pulling image", "ref", ref)
+	rc, err := c.cli.ImagePull(ctx, ref, image.PullOptions{})
+	if err != nil {
+		return err
+	}
+	defer rc.Close()
+	_, _ = io.Copy(io.Discard, rc) // must drain to completion
+	slog.Info("image pulled", "ref", ref)
+	return nil
 }
 
 // StopAndRemoveByMatchID finds the container labeled with matchID, stops it

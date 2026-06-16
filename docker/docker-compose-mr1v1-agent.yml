@@ -18,7 +18,7 @@ services:
       - HEARTBEAT_INTERVAL=10
       - PORT_RANGE_START=27015
       - PORT_RANGE_END=27025
-      - DOCKER_IMAGE=registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:latest
+      - DOCKER_IMAGE=registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.2.6
       - DOCKER_STOP_TIMEOUT=15
       - DESTROY_COMMAND=mr1v1_match_destroy
       - DESTROY_COUNTDOWN=5
