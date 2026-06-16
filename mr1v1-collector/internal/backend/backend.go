@@ -22,6 +22,7 @@ import (
 
 	"mr1v1-collector/internal/agentproto"
 	"mr1v1-collector/internal/config"
+	"mr1v1-collector/pkg/a2s"
 )
 
 //go:embed static
@@ -84,6 +85,7 @@ func (b *Backend) Handler() http.Handler {
 	mux.HandleFunc("POST /api/matches", b.handleCreateMatch)
 	mux.HandleFunc("GET /api/matches", b.handleListMatches)
 	mux.HandleFunc("GET /api/matches/{id}/logs", b.handleMatchLogs)
+	mux.HandleFunc("GET /api/matches/{id}/server", b.handleMatchServer)
 	mux.HandleFunc("POST /api/matches/{id}/end", b.handleEndMatch)
 	mux.HandleFunc("POST /api/matches/{id}/destroy", b.handleDestroyMatch)
 	// Agent 管理
@@ -658,6 +660,102 @@ func (b *Backend) staticHandler() http.Handler {
 		r.URL.Path = "/"
 		fileServer.ServeHTTP(w, r)
 	})
+}
+
+type serverQueryResponse struct {
+	Info    *a2s.ServerInfo  `json:"info"`
+	Players *a2s.PlayerInfo  `json:"players"`
+	Rules   *a2s.RulesInfo   `json:"rules"`
+	InfoErr string           `json:"info_error,omitempty"`
+	PlrErr  string           `json:"players_error,omitempty"`
+	RuleErr string           `json:"rules_error,omitempty"`
+}
+
+func (b *Backend) handleMatchServer(w http.ResponseWriter, r *http.Request) {
+	matchID := r.PathValue("id")
+	var publicIP string
+	var port int
+	err := b.pool.QueryRow(r.Context(), `
+		SELECT a.public_ip, m.port
+		FROM mr1v1_match m
+		JOIN mr1v1_agent a ON a.uuid = m.agent_uuid
+		WHERE m.match_id = $1
+	`, matchID).Scan(&publicIP, &port)
+	if err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	addr := fmt.Sprintf("%s:%d", publicIP, port)
+	resp := serverQueryResponse{}
+
+	type result[T any] struct {
+		val *T
+		err error
+	}
+	infoCh := make(chan result[a2s.ServerInfo], 1)
+	plrCh := make(chan result[a2s.PlayerInfo], 1)
+	ruleCh := make(chan result[a2s.RulesInfo], 1)
+
+	query := func(fn func(*a2s.Client) (any, error), ch any) {
+		cli, err := a2s.NewClient(addr, 3*time.Second)
+		if err != nil {
+			switch c := ch.(type) {
+			case chan result[a2s.ServerInfo]:
+				c <- result[a2s.ServerInfo]{err: err}
+			case chan result[a2s.PlayerInfo]:
+				c <- result[a2s.PlayerInfo]{err: err}
+			case chan result[a2s.RulesInfo]:
+				c <- result[a2s.RulesInfo]{err: err}
+			}
+			return
+		}
+		defer cli.Close()
+		v, e := fn(cli)
+		switch c := ch.(type) {
+		case chan result[a2s.ServerInfo]:
+			if e != nil {
+				c <- result[a2s.ServerInfo]{err: e}
+			} else {
+				c <- result[a2s.ServerInfo]{val: v.(*a2s.ServerInfo)}
+			}
+		case chan result[a2s.PlayerInfo]:
+			if e != nil {
+				c <- result[a2s.PlayerInfo]{err: e}
+			} else {
+				c <- result[a2s.PlayerInfo]{val: v.(*a2s.PlayerInfo)}
+			}
+		case chan result[a2s.RulesInfo]:
+			if e != nil {
+				c <- result[a2s.RulesInfo]{err: e}
+			} else {
+				c <- result[a2s.RulesInfo]{val: v.(*a2s.RulesInfo)}
+			}
+		}
+	}
+
+	go query(func(c *a2s.Client) (any, error) { return c.QueryInfo() }, infoCh)
+	go query(func(c *a2s.Client) (any, error) { return c.QueryPlayers() }, plrCh)
+	go query(func(c *a2s.Client) (any, error) { return c.QueryRules() }, ruleCh)
+
+	if r := <-infoCh; r.err != nil {
+		resp.InfoErr = r.err.Error()
+	} else {
+		resp.Info = r.val
+	}
+	if r := <-plrCh; r.err != nil {
+		resp.PlrErr = r.err.Error()
+	} else {
+		resp.Players = r.val
+	}
+	if r := <-ruleCh; r.err != nil {
+		resp.RuleErr = r.err.Error()
+	} else {
+		resp.Rules = r.val
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 func generateMatchID() (string, error) {
