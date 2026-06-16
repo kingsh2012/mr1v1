@@ -234,7 +234,7 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
 			 status, rehlds_run_max, rehlds_port_range,
 			 create_time, update_time, heartbeat_time)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', 0, '', NOW(), NOW(), NOW())
+		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', CAST($5 AS INTEGER), '', NOW(), NOW(), NOW())
 		ON CONFLICT (uuid) DO UPDATE SET
 			heartbeat_time = NOW(),
 			update_time = CASE
@@ -252,7 +252,11 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 			local_ip  = EXCLUDED.local_ip,
 			cpu       = EXCLUDED.cpu,
 			mem_mb    = EXCLUDED.mem_mb,
-			disk_gb   = EXCLUDED.disk_gb
+			disk_gb   = EXCLUDED.disk_gb,
+			rehlds_run_max = CASE
+				WHEN mr1v1_agent.rehlds_run_max = 0 THEN CAST(EXCLUDED.cpu AS INTEGER)
+				ELSE mr1v1_agent.rehlds_run_max
+			END
 	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB)
 	return err
 }

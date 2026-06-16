@@ -19,6 +19,7 @@ const (
 )
 
 // Heartbeat 由 agent 定期上报，consumer 将其 upsert 到 mr1v1_agent 表。
+// CPU 字段为 CPU 逻辑核心数（字符串形式，如 "4"），consumer 用它初始化 rehlds_run_max 默认值。
 type Heartbeat struct {
 	UUID      string `json:"uuid"`
 	Hostname  string `json:"hostname"`

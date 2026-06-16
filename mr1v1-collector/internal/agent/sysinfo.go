@@ -30,28 +30,18 @@ func collectSysInfo() sysInfo {
 func cpuInfo() string {
 	f, err := os.Open("/proc/cpuinfo")
 	if err != nil {
-		return ""
+		return "0"
 	}
 	defer f.Close()
 
-	var model string
 	cores := 0
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {
-		line := sc.Text()
-		if strings.HasPrefix(line, "model name") && model == "" {
-			if _, rest, ok := strings.Cut(line, ":"); ok {
-				model = strings.TrimSpace(rest)
-			}
-		}
-		if strings.HasPrefix(line, "processor") {
+		if strings.HasPrefix(sc.Text(), "processor") {
 			cores++
 		}
 	}
-	if model == "" {
-		return strconv.Itoa(cores) + " cores"
-	}
-	return strconv.Itoa(cores) + "x " + model
+	return strconv.Itoa(cores)
 }
 
 func memTotalMB() int64 {
