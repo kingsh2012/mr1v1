@@ -93,6 +93,7 @@ const ACTION_LABEL: Record<string, string> = {
   container_stopped: '容器停止',
   end_dispatched: '下发结束指令',
   destroy_dispatched: '下发销毁指令',
+  timeout_destroy: '超时自动销毁',
   match_started: '比赛开始',
   match_ended: '比赛结束',
 }
