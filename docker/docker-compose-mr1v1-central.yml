@@ -1,0 +1,32 @@
+services:
+  mr1v1-consumer:
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.0.1
+    container_name: mr1v1-consumer
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - MQTT_BROKER=tcp://10.2.8.8:1883
+      - MQTT_TOPIC=mr1v1/#
+      - MQTT_CLIENT_ID=mr1v1-consumer-prod
+      - MQTT_USER=saas
+      - MQTT_PASS=saas
+      - DB_HOST=10.2.8.8
+      - DB_PORT=5433
+      - DB_USER=mr1v1
+      - DB_PASS=Mr1v1Db2026!
+      - DB_NAME=mr1v1
+      - DB_SSL_MODE=disable
+      - DB_TIMEZONE=Asia/Shanghai
+
+  mr1v1-backend:
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.0.1
+    container_name: mr1v1-backend
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - HTTP_LISTEN=0.0.0.0:8080
+      - MQTT_BROKER=tcp://10.2.8.8:1883
+      - MQTT_CLIENT_ID=mr1v1-backend-prod
+      - MQTT_USER=saas
+      - MQTT_PASS=saas
+      - AGENT_STALE_SECONDS=30

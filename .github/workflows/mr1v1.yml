@@ -1,0 +1,207 @@
+name: Build MR1V1
+
+on:
+  push:
+    tags:
+      - 'mr1v1-consumer-v*'
+      - 'mr1v1-backend-v*'
+      - 'mr1v1-agent-v*'
+    branches: ["main"]
+
+env:
+  REGISTRY: registry.cn-beijing.aliyuncs.com
+  CONSUMER_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer
+  BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend
+  AGENT_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent
+
+jobs:
+  warm-cache:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mr1v1-collector/go.mod
+          cache: false
+
+      - name: Restore Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          restore-keys: mr1v1-go-${{ runner.os }}-
+
+      - name: Download modules
+        working-directory: mr1v1-collector
+        run: go mod download
+
+  build-consumer:
+    if: startsWith(github.ref, 'refs/tags/mr1v1-consumer-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-consumer-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mr1v1-collector/go.mod
+          cache: false
+
+      - name: Restore Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          restore-keys: mr1v1-go-${{ runner.os }}-
+
+      - name: Install tools
+        run: sudo apt-get install -y upx
+
+      - name: Build binary
+        working-directory: mr1v1-collector
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -ldflags="-s -w" \
+            -o mr1v1-consumer ./cmd/consumer
+          upx --best mr1v1-consumer
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: mr1v1-collector
+          file: mr1v1-collector/dockerfile/Dockerfile-consumer
+          push: true
+          tags: ${{ env.CONSUMER_IMAGE }}:${{ steps.meta.outputs.version }}
+
+  build-backend:
+    if: startsWith(github.ref, 'refs/tags/mr1v1-backend-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-backend-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mr1v1-collector/go.mod
+          cache: false
+
+      - name: Restore Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          restore-keys: mr1v1-go-${{ runner.os }}-
+
+      - name: Install tools
+        run: sudo apt-get install -y upx
+
+      - name: Build binary
+        working-directory: mr1v1-collector
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -ldflags="-s -w" \
+            -o mr1v1-backend ./cmd/backend
+          upx --best mr1v1-backend
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: mr1v1-collector
+          file: mr1v1-collector/dockerfile/Dockerfile-backend
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
+
+  build-agent:
+    if: startsWith(github.ref, 'refs/tags/mr1v1-agent-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-agent-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mr1v1-collector/go.mod
+          cache: false
+
+      - name: Restore Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          restore-keys: mr1v1-go-${{ runner.os }}-
+
+      - name: Install tools
+        run: sudo apt-get install -y upx
+
+      - name: Build binary
+        working-directory: mr1v1-collector
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -ldflags="-s -w" \
+            -o mr1v1-agent ./cmd/agent
+          upx --best mr1v1-agent
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: mr1v1-collector
+          file: mr1v1-collector/dockerfile/Dockerfile-agent
+          push: true
+          tags: ${{ env.AGENT_IMAGE }}:${{ steps.meta.outputs.version }}
