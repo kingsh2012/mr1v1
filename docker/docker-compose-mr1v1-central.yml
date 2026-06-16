@@ -18,7 +18,7 @@ services:
       - DB_TIMEZONE=Asia/Shanghai
 
   mr1v1-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.1.1
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.1.2
     container_name: mr1v1-backend
     restart: unless-stopped
     network_mode: host
