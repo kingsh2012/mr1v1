@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useRef } from 'react'
 import {
-  Table, Tag, Button, Modal, Form, Input, Space, message, Popconfirm, Typography, Tooltip,
+  Table, Tag, Button, Modal, Form, Input, Space, message, Popconfirm, Typography, Tooltip, Spin,
 } from 'antd'
+import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, DeleteOutlined, PoweroffOutlined } from '@ant-design/icons'
 import axios from 'axios'
 import dayjs from 'dayjs'
@@ -21,6 +22,62 @@ interface Match {
   create_time: string
   update_time: string
 }
+
+interface OpLog {
+  id: number
+  match_id: string
+  actor: string
+  action: string
+  detail: string
+  created_at: string
+}
+
+const ACTOR_COLOR: Record<string, string> = {
+  platform: 'blue',
+  agent: 'green',
+  game: 'orange',
+}
+
+const ACTION_LABEL: Record<string, string> = {
+  create_dispatched:  '下发创建指令',
+  container_started:  '容器启动',
+  container_error:    '容器异常',
+  container_stopped:  '容器停止',
+  end_dispatched:     '下发结束指令',
+  destroy_dispatched: '下发销毁指令',
+  match_started:      '比赛开始',
+  match_ended:        '比赛结束',
+}
+
+const LOG_COLUMNS: ColumnsType<OpLog> = [
+  {
+    title: '时间',
+    dataIndex: 'created_at',
+    key: 'created_at',
+    width: 180,
+    render: (v: string) => dayjs(v).format(FMT),
+  },
+  {
+    title: '来源',
+    dataIndex: 'actor',
+    key: 'actor',
+    width: 90,
+    render: (v: string) => <Tag color={ACTOR_COLOR[v] ?? 'default'}>{v}</Tag>,
+  },
+  {
+    title: '操作',
+    dataIndex: 'action',
+    key: 'action',
+    width: 160,
+    render: (v: string) => ACTION_LABEL[v] ?? v,
+  },
+  {
+    title: '详情',
+    dataIndex: 'detail',
+    key: 'detail',
+    render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
+  },
+]
 
 const STATE_COLOR: Record<string, string> = {
   creating:   'processing',
@@ -48,6 +105,9 @@ export default function MatchesPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [form] = Form.useForm()
+  const [logsCache, setLogsCache] = useState<Record<string, OpLog[]>>({})
+  const [logsLoading, setLogsLoading] = useState<Set<string>>(new Set())
+  const logsFetchedRef = useRef<Set<string>>(new Set())
 
   const fetchMatches = async () => {
     setLoading(true)
@@ -91,6 +151,40 @@ export default function MatchesPage() {
     await axios.post(`/api/matches/${matchID}/destroy`)
     message.success('已发送强制销毁指令')
     fetchMatches()
+  }
+
+  const fetchLogs = async (matchID: string) => {
+    if (logsFetchedRef.current.has(matchID)) return
+    logsFetchedRef.current.add(matchID)
+    setLogsLoading(prev => new Set(prev).add(matchID))
+    try {
+      const res = await axios.get<OpLog[]>(`/api/matches/${matchID}/logs`)
+      setLogsCache(prev => ({ ...prev, [matchID]: res.data ?? [] }))
+    } finally {
+      setLogsLoading(prev => { const s = new Set(prev); s.delete(matchID); return s })
+    }
+  }
+
+  const handleExpand = (expanded: boolean, record: Match) => {
+    if (expanded) fetchLogs(record.match_id)
+  }
+
+  const expandedRowRender = (record: Match) => {
+    const logs = logsCache[record.match_id]
+    if (logsLoading.has(record.match_id) || !logs) {
+      return <Spin style={{ padding: '16px 0' }} />
+    }
+    return (
+      <Table<OpLog>
+        rowKey="id"
+        dataSource={logs}
+        columns={LOG_COLUMNS}
+        pagination={false}
+        size="small"
+        style={{ margin: '0 48px' }}
+        locale={{ emptyText: '暂无操作记录' }}
+      />
+    )
   }
 
   const columns = [
@@ -176,6 +270,10 @@ export default function MatchesPage() {
         columns={columns}
         scroll={{ x: 'max-content' }}
         pagination={{ pageSize: 20 }}
+        expandable={{
+          expandedRowRender,
+          onExpand: handleExpand,
+        }}
       />
 
       <Modal
