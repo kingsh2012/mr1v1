@@ -1,24 +1,25 @@
 package matchmaker
 
 import (
+	"bytes"
 	"encoding/json"
-	"math/rand"
+	"fmt"
+	"io"
+	"log/slog"
+	"net/http"
 	"sync"
 
-	"github.com/google/uuid"
 	"mr1v1-collector/internal/wxserver/models"
 )
-
-var maps = []string{"草原", "沙漠", "雪地", "城市", "丛林"}
 
 type Matchmaker struct {
 	mu         sync.Mutex
 	queue      []*models.Player
-	gameServer string
+	backendURL string
 }
 
-func New(gameServerAddr string) *Matchmaker {
-	return &Matchmaker{gameServer: gameServerAddr}
+func New(backendURL string) *Matchmaker {
+	return &Matchmaker{backendURL: backendURL}
 }
 
 func (m *Matchmaker) Join(p *models.Player) {
@@ -54,17 +55,57 @@ func (m *Matchmaker) tryMatch() {
 	m.queue = m.queue[2:]
 	m.mu.Unlock()
 
-	roomID := uuid.New().String()[:8]
-	selectedMap := maps[rand.Intn(len(maps))]
+	matchID, serverAddr, err := m.createMatch(p1.SteamID, p2.SteamID)
+	if err != nil {
+		slog.Error("create match failed", "error", err,
+			"p1", p1.OpenID, "p2", p2.OpenID)
+		errMsg, _ := json.Marshal(models.MatchMessage{Type: "error", Message: "建房失败，请重试"})
+		go p1.Conn.WriteMessage(1, errMsg)
+		go p2.Conn.WriteMessage(1, errMsg)
+		// 重新入队
+		m.mu.Lock()
+		m.queue = append([]*models.Player{p1, p2}, m.queue...)
+		m.mu.Unlock()
+		return
+	}
 
 	msg := models.MatchMessage{
 		Type:       "matched",
-		ServerAddr: m.gameServer,
-		RoomID:     roomID,
-		Map:        selectedMap,
+		MatchID:    matchID,
+		ServerAddr: serverAddr,
 	}
 	data, _ := json.Marshal(msg)
 
+	slog.Info("match created", "match_id", matchID, "server_addr", serverAddr,
+		"p1", p1.OpenID, "p2", p2.OpenID)
+
 	go p1.Conn.WriteMessage(1, data)
 	go p2.Conn.WriteMessage(1, data)
+}
+
+type createMatchResp struct {
+	MatchID  string `json:"match_id"`
+	PublicIP string `json:"public_ip"`
+	Port     int    `json:"port"`
+}
+
+func (m *Matchmaker) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr string, err error) {
+	body, _ := json.Marshal(map[string]string{
+		"p0_steamid": p0SteamID,
+		"p1_steamid": p1SteamID,
+	})
+	resp, err := http.Post(m.backendURL+"/api/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
+	if err != nil {
+		return "", "", fmt.Errorf("call backend: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		raw, _ := io.ReadAll(resp.Body)
+		return "", "", fmt.Errorf("backend returned %d: %s", resp.StatusCode, string(raw))
+	}
+	var r createMatchResp
+	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+		return "", "", fmt.Errorf("decode response: %w", err)
+	}
+	return r.MatchID, fmt.Sprintf("%s:%d", r.PublicIP, r.Port), nil
 }

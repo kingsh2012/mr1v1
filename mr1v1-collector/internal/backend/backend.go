@@ -223,9 +223,10 @@ type createMatchRequest struct {
 }
 
 type createMatchResponse struct {
-	MatchID string `json:"match_id"`
-	UUID    string `json:"uuid"`
-	Port    int    `json:"port"`
+	MatchID   string `json:"match_id"`
+	UUID      string `json:"uuid"`
+	PublicIP  string `json:"public_ip"`
+	Port      int    `json:"port"`
 }
 
 func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
@@ -246,7 +247,7 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ctx := r.Context()
-	uuid, port, err := b.pickAgentPort(ctx)
+	uuid, publicIP, port, err := b.pickAgentPort(ctx)
 	if err != nil {
 		slog.Error("pick agent failed", "error", err)
 		http.Error(w, "no idle agent available", http.StatusServiceUnavailable)
@@ -299,20 +300,20 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("dispatched create command", "match_id", matchID, "uuid", uuid, "port", port, "image", image)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(createMatchResponse{MatchID: matchID, UUID: uuid, Port: port})
+	json.NewEncoder(w).Encode(createMatchResponse{MatchID: matchID, UUID: uuid, PublicIP: publicIP, Port: port})
 }
 
 // pickAgentPort 从PG查询一个可用agent并分配端口。
 // agent可用条件：status='enabled'，心跳在stale阈值内，rehlds_run_max>0，
 // rehlds_port_range格式"start-end"，且有空闲端口。
-func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err error) {
+func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, port int, err error) {
 	stale := b.cfg.AgentStaleSeconds
 	if stale <= 0 {
 		stale = 30
 	}
 
 	rows, err := b.pool.Query(ctx, `
-		SELECT uuid, rehlds_port_range, rehlds_run_max
+		SELECT uuid, public_ip, rehlds_port_range, rehlds_run_max
 		FROM mr1v1_agent
 		WHERE status = 'enabled'
 		  AND heartbeat_time > NOW() - $1 * INTERVAL '1 second'
@@ -321,25 +322,26 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 		ORDER BY heartbeat_time DESC
 	`, stale)
 	if err != nil {
-		return "", 0, err
+		return "", "", 0, err
 	}
 	defer rows.Close()
 
 	type candidate struct {
-		uuid       string
-		portRange  string
-		runMax     int
+		uuid      string
+		publicIP  string
+		portRange string
+		runMax    int
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.uuid, &c.portRange, &c.runMax); err != nil {
+		if err := rows.Scan(&c.uuid, &c.publicIP, &c.portRange, &c.runMax); err != nil {
 			continue
 		}
 		candidates = append(candidates, c)
 	}
 	if len(candidates) == 0 {
-		return "", 0, fmt.Errorf("no available agent")
+		return "", "", 0, fmt.Errorf("no available agent")
 	}
 
 	// 查各候选agent正在运行的容器端口
@@ -356,7 +358,7 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 		`, c.uuid)
 		if err != nil {
 			// 表可能不存在，降级直接用第一个端口
-			return c.uuid, start, nil
+			return c.uuid, c.publicIP, start, nil
 		}
 		busy := map[int]bool{}
 		for busyRows.Next() {
@@ -376,9 +378,9 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 			continue
 		}
 		mathrand.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
-		return c.uuid, available[0], nil
+		return c.uuid, c.publicIP, available[0], nil
 	}
-	return "", 0, fmt.Errorf("all agents are at capacity")
+	return "", "", 0, fmt.Errorf("all agents are at capacity")
 }
 
 type matchRow struct {

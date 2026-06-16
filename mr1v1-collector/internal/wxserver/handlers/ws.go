@@ -14,8 +14,9 @@ var upgrader = websocket.Upgrader{
 }
 
 type joinMsg struct {
-	Type  string `json:"type"`
-	Token string `json:"token"`
+	Type    string `json:"type"`
+	Token   string `json:"token"`
+	SteamID string `json:"steamid"`
 }
 
 func MatchmakingHandler(mm *matchmaker.Matchmaker) http.HandlerFunc {
@@ -35,6 +36,10 @@ func MatchmakingHandler(mm *matchmaker.Matchmaker) http.HandlerFunc {
 			conn.WriteJSON(models.MatchMessage{Type: "error", Message: "invalid message"})
 			return
 		}
+		if join.SteamID == "" {
+			conn.WriteJSON(models.MatchMessage{Type: "error", Message: "steamid required"})
+			return
+		}
 
 		openid, ok := GetOpenIDByToken(join.Token)
 		if !ok {
@@ -42,7 +47,7 @@ func MatchmakingHandler(mm *matchmaker.Matchmaker) http.HandlerFunc {
 			return
 		}
 
-		player := &models.Player{OpenID: openid, Conn: conn}
+		player := &models.Player{OpenID: openid, SteamID: join.SteamID, Conn: conn}
 		conn.WriteJSON(models.MatchMessage{Type: "waiting", Message: "等待匹配中..."})
 		mm.Join(player)
 

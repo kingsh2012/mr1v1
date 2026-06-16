@@ -12,13 +12,13 @@ import (
 func main() {
 	cfg := wxconfig.LoadWx()
 
-	mm := matchmaker.New(cfg.GameServerAddr)
+	mm := matchmaker.New(cfg.BackendURL)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/login", handlers.LoginHandler(cfg))
 	mux.HandleFunc("/ws/matchmaking", handlers.MatchmakingHandler(mm))
 
-	slog.Info("mr1v1-wx listening", "addr", ":"+cfg.Port, "game_server", cfg.GameServerAddr)
+	slog.Info("mr1v1-wx listening", "addr", ":"+cfg.Port, "backend", cfg.BackendURL)
 	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
 		slog.Error("server stopped", "error", err)
 	}

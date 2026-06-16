@@ -5,16 +5,16 @@ import "os"
 type WxConfig struct {
 	WxAppID        string
 	WxAppSecret    string
-	GameServerAddr string
+	BackendURL     string // mr1v1-backend HTTP 地址，如 http://127.0.0.1:8181
 	Port           string
 }
 
 func LoadWx() *WxConfig {
 	return &WxConfig{
-		WxAppID:        getEnv("WX_APP_ID", ""),
-		WxAppSecret:    getEnv("WX_APP_SECRET", ""),
-		GameServerAddr: getEnv("GAME_SERVER_ADDR", "ws://localhost:9000"),
-		Port:           getEnv("WX_PORT", "8082"),
+		WxAppID:     getEnv("WX_APP_ID", ""),
+		WxAppSecret: getEnv("WX_APP_SECRET", ""),
+		BackendURL:  getEnv("BACKEND_URL", "http://127.0.0.1:8181"),
+		Port:        getEnv("WX_PORT", "8082"),
 	}
 }
 

@@ -3,14 +3,14 @@ package models
 import "github.com/gorilla/websocket"
 
 type Player struct {
-	OpenID string
-	Conn   *websocket.Conn
+	OpenID  string
+	SteamID string
+	Conn    *websocket.Conn
 }
 
 type MatchMessage struct {
 	Type       string `json:"type"`
-	ServerAddr string `json:"server_addr,omitempty"`
-	RoomID     string `json:"room_id,omitempty"`
-	Map        string `json:"map,omitempty"`
+	MatchID    string `json:"match_id,omitempty"`
+	ServerAddr string `json:"server_addr,omitempty"` // host:port，供小程序连接 CS 服务器
 	Message    string `json:"message,omitempty"`
 }
