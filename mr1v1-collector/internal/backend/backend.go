@@ -193,10 +193,10 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 		newState = "error"
 		action = "container_error"
 	case agentproto.StateStopped:
-		// 只有意外停止才标 error；finished/terminated/error 已是终态不覆盖
+		// 只有意外停止才标 error；finished/terminated/timeout/error 已是终态不覆盖
 		b.pool.Exec(context.Background(),
 			`UPDATE mr1v1_match SET state='error', update_time=NOW()
-			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','error')`,
+			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','timeout','error')`,
 			status.MatchID)
 		b.writeLog(status.MatchID, "agent", "container_stopped",
 			fmt.Sprintf(`{"port":%d,"message":"%s"}`, status.Port, status.Message))
