@@ -352,9 +352,7 @@ func (a *Agent) heartbeatLoop() {
 
 	// 系统信息相对稳定，每10次心跳重采一次。
 	info := collectSysInfo()
-	if a.cfg.Heartbeat.PublicIP != "" {
-		info.localIP = info.localIP // keep detected
-	}
+	// publicIP 由配置覆盖，localIP 保持自动探测结果
 	ticker := time.NewTicker(interval)
 	refreshCount := 0
 	defer ticker.Stop()
