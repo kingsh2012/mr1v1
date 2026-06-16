@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import {
-  Table, Tag, Button, Modal, Form, Select, InputNumber, Radio, Space, message, Typography,
+  Table, Tag, Button, Modal, Form, Select, InputNumber, Radio, Space, message, Typography, Alert,
 } from 'antd'
 import { EditOutlined } from '@ant-design/icons'
 import axios from 'axios'
@@ -12,6 +12,8 @@ dayjs.extend(relativeTime)
 dayjs.locale('zh-cn')
 
 const { Text } = Typography
+const FMT = 'YYYY-MM-DD HH:mm:ss'
+const STALE_SECONDS = 30
 
 interface Agent {
   uuid: string
@@ -29,18 +31,10 @@ interface Agent {
   heartbeat_time: string
 }
 
-const FMT = 'YYYY-MM-DD HH:mm:ss'
-
-const STALE_SECONDS = 30
-
 function isOnline(hbt: string): boolean {
   return dayjs().diff(dayjs(hbt), 'second') < STALE_SECONDS
 }
 
-// 将存储字符串解析回编辑状态
-// "27015-27025" → { mode: 'range', start: 27015, end: 27025 }
-// "27015,27020,27030" → { mode: 'list', ports: ['27015','27020','27030'] }
-// "" → { mode: 'range', start: undefined, end: undefined }
 function parsePortRange(raw: string): { mode: 'range' | 'list'; start?: number; end?: number; ports: string[] } {
   if (!raw) return { mode: 'range', ports: [] }
   if (raw.includes('-') && !raw.includes(',')) {
@@ -50,13 +44,30 @@ function parsePortRange(raw: string): { mode: 'range' | 'list'; start?: number; 
   return { mode: 'list', ports: raw.split(',').map(s => s.trim()).filter(Boolean) }
 }
 
-// 将编辑状态序列化为存储字符串
 function serializePortRange(mode: 'range' | 'list', start?: number, end?: number, ports?: string[]): string {
   if (mode === 'range') {
     if (start == null || end == null) return ''
     return `${start}-${end}`
   }
   return (ports ?? []).join(',')
+}
+
+function portCount(mode: 'range' | 'list', start?: number, end?: number, ports?: string[]): number {
+  if (mode === 'range') {
+    if (start == null || end == null || end < start) return 0
+    return end - start + 1
+  }
+  return (ports ?? []).length
+}
+
+// 只允许数字键，屏蔽其他字符
+function numbersOnly(e: React.KeyboardEvent) {
+  if (
+    !/^\d$/.test(e.key) &&
+    !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Enter'].includes(e.key)
+  ) {
+    e.preventDefault()
+  }
 }
 
 type PortMode = 'range' | 'list'
@@ -94,24 +105,53 @@ export default function AgentsPage() {
     setPortStart(parsed.start)
     setPortEnd(parsed.end)
     setPortList(parsed.ports)
-    form.setFieldsValue({
-      status: agent.status,
-      rehlds_run_max: agent.rehlds_run_max,
-    })
+    form.setFieldsValue({ status: agent.status, rehlds_run_max: agent.rehlds_run_max })
   }
 
   const handleSave = async () => {
     if (!editTarget) return
     const values = await form.validateFields()
+    const runMax: number = values.rehlds_run_max ?? 0
+    const cnt = portCount(portMode, portStart, portEnd, portList)
+
+    // 端口数量校验
+    if (cnt < runMax) {
+      message.error(`端口数量（${cnt}）不能少于 REHLDS 最大并发数（${runMax}）`)
+      return
+    }
+
+    // 端口范围格式校验
+    if (portMode === 'range') {
+      if (portStart == null || portEnd == null) {
+        message.error('请填写起始端口和结束端口')
+        return
+      }
+      if (portEnd <= portStart) {
+        message.error('结束端口必须大于起始端口')
+        return
+      }
+    } else {
+      if (portList.length === 0) {
+        message.error('请至少输入一个端口号')
+        return
+      }
+      const invalid = portList.find(p => !/^\d+$/.test(p) || +p < 1 || +p > 65535)
+      if (invalid) {
+        message.error(`端口号无效：${invalid}`)
+        return
+      }
+    }
+
     const portRange = serializePortRange(portMode, portStart, portEnd, portList)
-    await axios.patch(`/api/agents/${editTarget.uuid}`, {
-      ...values,
-      rehlds_port_range: portRange,
-    })
+    await axios.patch(`/api/agents/${editTarget.uuid}`, { ...values, rehlds_port_range: portRange })
     message.success('保存成功')
     setEditTarget(null)
     fetchAgents()
   }
+
+  const runMax: number = Form.useWatch('rehlds_run_max', form) ?? 0
+  const cnt = portCount(portMode, portStart, portEnd, portList)
+  const portInsufficient = cnt > 0 && runMax > 0 && cnt < runMax
 
   const columns = [
     {
@@ -135,10 +175,12 @@ export default function AgentsPage() {
       title: '调度状态',
       dataIndex: 'status',
       key: 'status',
-      render: (v: string) => <Tag color={v === 'enabled' ? 'blue' : 'red'}>{v === 'enabled' ? '可调度' : '禁用'}</Tag>,
+      render: (v: string) => (
+        <Tag color={v === 'enabled' ? 'blue' : 'red'}>{v === 'enabled' ? '可调度' : '禁用'}</Tag>
+      ),
     },
-    { title: '最大并发', dataIndex: 'rehlds_run_max', key: 'rehlds_run_max' },
-    { title: '端口范围', dataIndex: 'rehlds_port_range', key: 'rehlds_port_range' },
+    { title: 'REHLDS最大并发', dataIndex: 'rehlds_run_max', key: 'rehlds_run_max' },
+    { title: 'REHLDS端口范围', dataIndex: 'rehlds_port_range', key: 'rehlds_port_range' },
     {
       title: '创建时间',
       dataIndex: 'create_time',
@@ -163,9 +205,7 @@ export default function AgentsPage() {
       title: '操作',
       key: 'action',
       render: (_: unknown, r: Agent) => (
-        <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>
-          编辑
-        </Button>
+        <Button size="small" icon={<EditOutlined />} onClick={() => openEdit(r)}>编辑</Button>
       ),
     },
   ]
@@ -200,10 +240,11 @@ export default function AgentsPage() {
               ]}
             />
           </Form.Item>
-          <Form.Item name="rehlds_run_max" label="最大并发 rehlds 数">
+          <Form.Item name="rehlds_run_max" label="REHLDS最大并发数">
             <InputNumber min={0} style={{ width: '100%' }} />
           </Form.Item>
-          <Form.Item label="端口范围">
+
+          <Form.Item label="REHLDS端口范围" style={{ marginBottom: portInsufficient ? 4 : undefined }}>
             <Radio.Group
               value={portMode}
               onChange={e => setPortMode(e.target.value)}
@@ -212,42 +253,65 @@ export default function AgentsPage() {
               <Radio.Button value="range">连续范围</Radio.Button>
               <Radio.Button value="list">自定义端口</Radio.Button>
             </Radio.Group>
-            {portMode === 'range' ? (
-              <Space>
-                <InputNumber
-                  min={1}
-                  max={65535}
-                  placeholder="起始端口"
-                  value={portStart}
-                  onChange={v => setPortStart(v ?? undefined)}
-                />
-                <span>—</span>
-                <InputNumber
-                  min={1}
-                  max={65535}
-                  placeholder="结束端口"
-                  value={portEnd}
-                  onChange={v => setPortEnd(v ?? undefined)}
-                />
-              </Space>
-            ) : (
-              <Select
-                mode="tags"
-                style={{ width: '100%' }}
-                placeholder="输入端口号后回车，如 27015"
-                value={portList}
-                onChange={vals => setPortList(vals)}
-                tokenSeparators={[',']}
-                open={false}
-                onInputKeyDown={e => {
-                  const ch = e.key
-                  if (!/[\d]/.test(ch) && !['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Enter', 'Tab'].includes(ch)) {
-                    e.preventDefault()
-                  }
-                }}
-              />
-            )}
+
+            {/* 两种模式输入区固定在同一位置，高度一致 */}
+            <div style={{ minHeight: 32 }}>
+              {portMode === 'range' ? (
+                <Space>
+                  <InputNumber
+                    min={1}
+                    max={65535}
+                    placeholder="起始端口"
+                    value={portStart}
+                    onChange={v => setPortStart(v ?? undefined)}
+                    onKeyDown={numbersOnly}
+                    style={{ width: 120 }}
+                  />
+                  <span style={{ userSelect: 'none' }}>—</span>
+                  <InputNumber
+                    min={1}
+                    max={65535}
+                    placeholder="结束端口"
+                    value={portEnd}
+                    onChange={v => setPortEnd(v ?? undefined)}
+                    onKeyDown={numbersOnly}
+                    style={{ width: 120 }}
+                  />
+                  {cnt > 0 && <Text type="secondary">共 {cnt} 个端口</Text>}
+                </Space>
+              ) : (
+                <>
+                  <Select
+                    mode="tags"
+                    style={{ width: '100%' }}
+                    placeholder="输入端口号后按 Enter 添加"
+                    value={portList}
+                    onChange={vals => {
+                      // 过滤掉非纯数字的 tag
+                      setPortList(vals.filter((v: string) => /^\d+$/.test(v)))
+                    }}
+                    tokenSeparators={[',']}
+                    open={false}
+                    onInputKeyDown={numbersOnly}
+                  />
+                  {portList.length > 0 && (
+                    <Text type="secondary" style={{ marginTop: 4, display: 'block' }}>
+                      共 {portList.length} 个端口
+                    </Text>
+                  )}
+                </>
+              )}
+            </div>
           </Form.Item>
+
+          {portInsufficient && (
+            <Alert
+              type="warning"
+              showIcon
+              message={`端口数量（${cnt}）少于 REHLDS 最大并发数（${runMax}），保存时将被拒绝`}
+              style={{ marginBottom: 16 }}
+            />
+          )}
         </Form>
       </Modal>
     </>
