@@ -698,7 +698,20 @@ func (b *Backend) handleMatchServer(w http.ResponseWriter, r *http.Request) {
 	ruleCh := make(chan result[a2s.RulesInfo], 1)
 
 	query := func(fn func(*a2s.Client) (any, error), ch any) {
-		cli, err := a2s.NewClient(addr, 3*time.Second)
+		defer func() {
+			if r := recover(); r != nil {
+				err := fmt.Errorf("a2s panic: %v", r)
+				switch c := ch.(type) {
+				case chan result[a2s.ServerInfo]:
+					c <- result[a2s.ServerInfo]{err: err}
+				case chan result[a2s.PlayerInfo]:
+					c <- result[a2s.PlayerInfo]{err: err}
+				case chan result[a2s.RulesInfo]:
+					c <- result[a2s.RulesInfo]{err: err}
+				}
+			}
+		}()
+		cli, err := a2s.NewClient(addr, 3*time.Second, true) // goldsrc=true for CS 1.6/ReHLDS
 		if err != nil {
 			switch c := ch.(type) {
 			case chan result[a2s.ServerInfo]:

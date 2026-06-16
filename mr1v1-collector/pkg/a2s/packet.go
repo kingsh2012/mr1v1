@@ -113,7 +113,6 @@ func (c *Client) collectMulti(data []byte) ([]byte, error) {
 		id         uint32
 		total      uint8
 		number     uint8
-		splitSize  uint16
 		compressed bool
 		payload    []byte
 	}
@@ -124,11 +123,16 @@ func (c *Client) collectMulti(data []byte) ([]byte, error) {
 		}
 		p := &mpkt{}
 		p.id = r.u32()
-		p.compressed = (p.id & 0x80000000) != 0
-		p.total = r.u8()
-		p.number = r.u8()
-		if !c.preOrange {
-			p.splitSize = r.u16()
+		if c.goldsrc {
+			// GoldSrc: total and number packed into one byte as (number<<4)|total
+			packed := r.u8()
+			p.total = packed & 0x0F
+			p.number = packed >> 4
+		} else {
+			p.compressed = (p.id & 0x80000000) != 0
+			p.total = r.u8()
+			p.number = r.u8()
+			r.u16() // SplitSize (Source Engine only)
 		}
 		p.payload = d[r.pos_():]
 		return p, nil

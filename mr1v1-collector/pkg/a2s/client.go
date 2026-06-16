@@ -16,14 +16,17 @@ const (
 )
 
 // Client holds the UDP connection to a game server.
+// GoldSrc (CS 1.6 / ReHLDS) uses a different multi-packet format:
+// total+number are packed into a single byte as (number<<4)|total,
+// and there is no SplitSize field. Set goldsrc=true for these servers.
 type Client struct {
-	conn      net.Conn
-	timeout   time.Duration
-	preOrange bool
+	conn    net.Conn
+	timeout time.Duration
+	goldsrc bool // true for GoldSrc / pre-Orange Box servers (e.g. CS 1.6)
 }
 
-// NewClient dials a game server at addr (host:port or host, defaulting to 27015).
-func NewClient(addr string, timeout time.Duration) (*Client, error) {
+// NewClient dials a game server. Set goldsrc=true for CS 1.6 / ReHLDS servers.
+func NewClient(addr string, timeout time.Duration, goldsrc bool) (*Client, error) {
 	if !strings.Contains(addr, ":") {
 		addr = fmt.Sprintf("%s:%d", addr, DefaultPort)
 	}
@@ -34,7 +37,7 @@ func NewClient(addr string, timeout time.Duration) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{conn: conn, timeout: timeout}, nil
+	return &Client{conn: conn, timeout: timeout, goldsrc: goldsrc}, nil
 }
 
 func (c *Client) Close() { c.conn.Close() }
