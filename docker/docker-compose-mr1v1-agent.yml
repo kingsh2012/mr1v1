@@ -16,6 +16,7 @@ services:
       - MQTT_PASS=agent
       - QUEUE_CAPACITY=10000
       - HEARTBEAT_INTERVAL=10
+      - PUBLIC_IP=60.205.152.236
       - PORT_RANGE_START=27015
       - PORT_RANGE_END=27025
       - DOCKER_IMAGE=registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.2.6
