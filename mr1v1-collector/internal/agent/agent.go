@@ -53,9 +53,9 @@ type Agent struct {
 	matches map[string]matchState // match_id -> {port, rcon_password}
 }
 
-// New creates an Agent: connects the telemetry gateway, opens a separate
-// control-plane MQTT connection, subscribes to this host's create-command
-// topic, and starts the heartbeat loop.
+// New creates an Agent: opens a single MQTT connection shared between the
+// telemetry gateway and the control plane, subscribes to this host's
+// create-command topic, and starts the heartbeat loop.
 func New(cfg *config.AgentConfig) (*Agent, error) {
 	hostID, err := loadOrCreateHostID(cfg.HostID.File)
 	if err != nil {
@@ -67,28 +67,11 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 		return nil, err
 	}
 
-	// a is captured by the gateway's onEnvelope hook below. It is only
-	// invoked from HTTP request handlers, which cannot fire until New
-	// returns and a has been assigned, so the nil window is safe.
-	var a *Agent
-	gwMQTT := cfg.MQTT
-	gwMQTT.ClientID = "mr1v1-agent-" + hostID
-	gw, err := gateway.NewWithHook(&config.GatewayConfig{
-		HTTP:  cfg.HTTP,
-		MQTT:  gwMQTT,
-		Queue: struct{ Capacity int }{Capacity: cfg.Queue.Capacity},
-	}, func(env envelope.Envelope) {
-		a.onEnvelope(env)
-	})
-	if err != nil {
-		docker.Close()
-		return nil, fmt.Errorf("init telemetry gateway: %w", err)
-	}
-
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.Broker).
-		SetClientID("mr1v1-agent-" + hostID + "-ctl").
+		SetClientID("mr1v1-agent-" + hostID).
 		SetAutoReconnect(true).
+		SetCleanSession(false).
 		SetConnectTimeout(10 * time.Second).
 		SetKeepAlive(30 * time.Second)
 	if cfg.MQTT.User != "" {
@@ -98,10 +81,17 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 
 	client := mqtt.NewClient(opts)
 	if token := client.Connect(); token.Wait() && token.Error() != nil {
-		gw.Close()
 		docker.Close()
-		return nil, fmt.Errorf("connect control-plane mqtt broker %s: %w", cfg.MQTT.Broker, token.Error())
+		return nil, fmt.Errorf("connect mqtt broker %s: %w", cfg.MQTT.Broker, token.Error())
 	}
+
+	// a is captured by the gateway's onEnvelope hook below. It is only
+	// invoked from HTTP request handlers, which cannot fire until New
+	// returns and a has been assigned, so the nil window is safe.
+	var a *Agent
+	gw := gateway.NewWithClient(client, cfg.MQTT.TopicPrefix, cfg.Queue.Capacity, func(env envelope.Envelope) {
+		a.onEnvelope(env)
+	})
 
 	a = &Agent{
 		cfg:     cfg,
@@ -130,10 +120,10 @@ func (a *Agent) Handler() http.Handler {
 	return a.gw.Handler()
 }
 
-// Close disconnects both MQTT connections and the Docker client.
+// Close 关闭gateway队列、断开MQTT连接、关闭Docker客户端。
 func (a *Agent) Close() {
-	a.client.Disconnect(250)
 	a.gw.Close()
+	a.client.Disconnect(250)
 	a.docker.Close()
 }
 

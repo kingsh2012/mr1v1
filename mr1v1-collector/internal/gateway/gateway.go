@@ -16,9 +16,10 @@ import (
 
 // Server 持有HTTP handler和MQTT发布所需的状态。
 type Server struct {
-	cfg    *config.GatewayConfig
-	client mqtt.Client
-	queue  chan envelope.Envelope
+	cfg         *config.GatewayConfig
+	client      mqtt.Client
+	ownsClient  bool // true时Close()负责断开连接
+	queue       chan envelope.Envelope
 	// onEnvelope, if set, is called synchronously for every accepted
 	// envelope before it is queued for MQTT publish. Used by the agent to
 	// react to events such as mr1v1_match_end (container teardown).
@@ -30,8 +31,7 @@ func New(cfg *config.GatewayConfig) (*Server, error) {
 	return NewWithHook(cfg, nil)
 }
 
-// NewWithHook 与New相同，但额外注册一个onEnvelope回调，在每条被接受的事件
-// 入队前同步调用。回调应保持轻量，避免阻塞HTTP请求。
+// NewWithHook 与New相同，但额外注册一个onEnvelope回调。
 func NewWithHook(cfg *config.GatewayConfig, onEnvelope func(envelope.Envelope)) (*Server, error) {
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.Broker).
@@ -57,11 +57,30 @@ func NewWithHook(cfg *config.GatewayConfig, onEnvelope func(envelope.Envelope)) 
 	s := &Server{
 		cfg:        cfg,
 		client:     client,
+		ownsClient: true,
 		queue:      make(chan envelope.Envelope, capacity),
 		onEnvelope: onEnvelope,
 	}
 	go s.publishLoop()
 	return s, nil
+}
+
+// NewWithClient 使用调用方已建立的MQTT连接创建Server。
+// 连接的生命周期由调用方管理，Close()不会断开连接。
+func NewWithClient(client mqtt.Client, topicPrefix string, capacity int, onEnvelope func(envelope.Envelope)) *Server {
+	if capacity <= 0 {
+		capacity = 10000
+	}
+	s := &Server{
+		cfg: &config.GatewayConfig{},
+		client:     client,
+		ownsClient: false,
+		queue:      make(chan envelope.Envelope, capacity),
+		onEnvelope: onEnvelope,
+	}
+	s.cfg.MQTT.TopicPrefix = topicPrefix
+	go s.publishLoop()
+	return s
 }
 
 // Handler 返回注册了 /record 和 /healthz 的 http.Handler。
@@ -107,7 +126,7 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) publishLoop() {
-	for env := range s.queue {
+	for env := range s.queue { //nolint:revive
 		payload, err := json.Marshal(env)
 		if err != nil {
 			slog.Error("marshal envelope failed", "error", err, "type", env.Type, "match_id", env.MatchID)
@@ -122,7 +141,10 @@ func (s *Server) publishLoop() {
 	}
 }
 
-// Close 断开MQTT连接。
+// Close 关闭队列并（若连接由本Server创建）断开MQTT连接。
 func (s *Server) Close() {
-	s.client.Disconnect(250)
+	close(s.queue)
+	if s.ownsClient {
+		s.client.Disconnect(250)
+	}
 }
