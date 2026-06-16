@@ -43,6 +43,14 @@ type CreateCommand struct {
 	Image      string `json:"image"`
 }
 
+// DestroyCommand 由 backend 下发给指定 agent，指示其销毁一个 rehlds 容器。
+// Force=false：先发 RCON 倒计时再 docker stop（优雅结束）。
+// Force=true：直接 docker stop，不走 RCON。
+type DestroyCommand struct {
+	MatchID string `json:"match_id"`
+	Force   bool   `json:"force"`
+}
+
 // StatusReport 由 agent 在建房结果/容器销毁后上报。
 type StatusReport struct {
 	MatchID   string `json:"match_id"`
@@ -61,9 +69,14 @@ func CreateTopic(uuid string) string {
 	return fmt.Sprintf("%s/%s/create", TopicPrefix, uuid)
 }
 
+func DestroyTopic(uuid string) string {
+	return fmt.Sprintf("%s/%s/destroy", TopicPrefix, uuid)
+}
+
 func StatusTopic(uuid string) string {
 	return fmt.Sprintf("%s/%s/status", TopicPrefix, uuid)
 }
 
 const HeartbeatSubscribeFilter = TopicPrefix + "/+/heartbeat"
 const StatusSubscribeFilter = TopicPrefix + "/+/status"
+const DestroySubscribeFilter = TopicPrefix + "/+/destroy"

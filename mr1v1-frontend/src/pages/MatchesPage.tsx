@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import {
-  Table, Tag, Button, Modal, Form, Input, Space, message, Popconfirm, Typography,
+  Table, Tag, Button, Modal, Form, Input, Space, message, Popconfirm, Typography, Tooltip,
 } from 'antd'
-import { PlusOutlined, DeleteOutlined } from '@ant-design/icons'
+import { PlusOutlined, DeleteOutlined, PoweroffOutlined } from '@ant-design/icons'
 import axios from 'axios'
 import dayjs from 'dayjs'
 
@@ -79,9 +79,15 @@ export default function MatchesPage() {
     }
   }
 
+  const handleEnd = async (matchID: string) => {
+    await axios.post(`/api/matches/${matchID}/end`)
+    message.success('已发送结束指令（RCON倒计时后销毁）')
+    fetchMatches()
+  }
+
   const handleDestroy = async (matchID: string) => {
     await axios.post(`/api/matches/${matchID}/destroy`)
-    message.success('已发送销毁指令')
+    message.success('已发送强制销毁指令')
     fetchMatches()
   }
 
@@ -123,17 +129,31 @@ export default function MatchesPage() {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 160,
       render: (_: unknown, r: Match) =>
         ACTIVE_STATES.has(r.state) ? (
-          <Popconfirm
-            title="确认强制销毁该比赛容器？"
-            onConfirm={() => handleDestroy(r.match_id)}
-            okText="确认"
-            cancelText="取消"
-          >
-            <Button size="small" danger icon={<DeleteOutlined />}>销毁</Button>
-          </Popconfirm>
+          <Space size={4}>
+            <Tooltip title="RCON倒计时通知玩家后销毁容器">
+              <Popconfirm
+                title="结束比赛？将发送RCON倒计时指令后销毁容器。"
+                onConfirm={() => handleEnd(r.match_id)}
+                okText="确认"
+                cancelText="取消"
+              >
+                <Button size="small" icon={<PoweroffOutlined />}>结束</Button>
+              </Popconfirm>
+            </Tooltip>
+            <Tooltip title="立即强制停止容器，不通知玩家">
+              <Popconfirm
+                title="强制销毁容器？玩家不会收到通知。"
+                onConfirm={() => handleDestroy(r.match_id)}
+                okText="确认"
+                cancelText="取消"
+              >
+                <Button size="small" danger icon={<DeleteOutlined />}>销毁</Button>
+              </Popconfirm>
+            </Tooltip>
+          </Space>
         ) : null,
     },
   ]

@@ -106,9 +106,15 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("subscribe %s: %w", createTopic, token.Error())
 	}
 
+	destroyTopic := agentproto.DestroyTopic(uuid)
+	if token := client.Subscribe(destroyTopic, 1, a.onDestroy); token.Wait() && token.Error() != nil {
+		a.Close()
+		return nil, fmt.Errorf("subscribe %s: %w", destroyTopic, token.Error())
+	}
+
 	go a.heartbeatLoop()
 
-	slog.Info("agent started", "uuid", uuid, "create_topic", createTopic)
+	slog.Info("agent started", "uuid", uuid, "create_topic", createTopic, "destroy_topic", destroyTopic)
 	return a, nil
 }
 
@@ -131,7 +137,7 @@ func (a *Agent) onEnvelope(env envelope.Envelope) {
 	if env.Type != envelope.TypeMatchEnd {
 		return
 	}
-	go a.teardownMatch(env.MatchID)
+	go a.teardownMatch(env.MatchID, false)
 }
 
 func (a *Agent) onCreate(_ mqtt.Client, msg mqtt.Message) {
@@ -202,15 +208,27 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 	})
 }
 
-func (a *Agent) teardownMatch(matchID string) {
+func (a *Agent) onDestroy(_ mqtt.Client, msg mqtt.Message) {
+	var cmd agentproto.DestroyCommand
+	if err := json.Unmarshal(msg.Payload(), &cmd); err != nil {
+		slog.Error("decode destroy command failed", "error", err, "payload", string(msg.Payload()))
+		return
+	}
+	slog.Info("received destroy command", "match_id", cmd.MatchID, "force", cmd.Force)
+	go a.teardownMatch(cmd.MatchID, cmd.Force)
+}
+
+func (a *Agent) teardownMatch(matchID string, force bool) {
 	timeout := time.Duration(a.cfg.Docker.StopTimeoutSeconds) * time.Second
 	if timeout <= 0 {
 		timeout = defaultStopTimeout
 	}
 
-	state, ok := a.matchByID(matchID)
-	if ok && state.rconPassword != "" {
-		a.triggerDestroyCountdown(matchID, state)
+	if !force {
+		state, ok := a.matchByID(matchID)
+		if ok && state.rconPassword != "" {
+			a.triggerDestroyCountdown(matchID, state)
+		}
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), timeout+10*time.Second)

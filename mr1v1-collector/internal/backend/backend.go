@@ -82,6 +82,7 @@ func (b *Backend) Handler() http.Handler {
 	// 比赛
 	mux.HandleFunc("POST /api/matches", b.handleCreateMatch)
 	mux.HandleFunc("GET /api/matches", b.handleListMatches)
+	mux.HandleFunc("POST /api/matches/{id}/end", b.handleEndMatch)
 	mux.HandleFunc("POST /api/matches/{id}/destroy", b.handleDestroyMatch)
 	// Agent 管理
 	mux.HandleFunc("GET /api/agents", b.handleListAgents)
@@ -334,14 +335,23 @@ func (b *Backend) handleListMatches(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
+// handleEndMatch 优雅结束比赛：agent 先发 RCON 倒计时再 docker stop。
+func (b *Backend) handleEndMatch(w http.ResponseWriter, r *http.Request) {
+	b.dispatchDestroy(w, r, false)
+}
+
+// handleDestroyMatch 强制销毁：agent 直接 docker stop，不走 RCON。
 func (b *Backend) handleDestroyMatch(w http.ResponseWriter, r *http.Request) {
+	b.dispatchDestroy(w, r, true)
+}
+
+func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force bool) {
 	matchID := r.PathValue("id")
 	if matchID == "" {
 		http.Error(w, "match_id required", http.StatusBadRequest)
 		return
 	}
 
-	// 查出 agent_uuid，通过 MQTT 下发销毁指令
 	var agentUUID string
 	err := b.pool.QueryRow(r.Context(),
 		`SELECT agent_uuid FROM mr1v1_match WHERE match_id=$1`, matchID,
@@ -351,19 +361,16 @@ func (b *Backend) handleDestroyMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 复用 CreateCommand 里的 MatchID 字段触发 agent 侧的 teardown
-	// agent 收到 destroy topic（未来可拓展为独立 topic，目前用 RCON destroy 流程）
-	// 这里先直接更新状态为 error，由 agent 的 RCON 销毁机制负责容器清理
-	// 如果需要立即强制销毁，需要单独的 destroy MQTT topic
-	cmd := map[string]string{"match_id": matchID, "action": "destroy"}
+	cmd := agentproto.DestroyCommand{MatchID: matchID, Force: force}
 	payload, _ := json.Marshal(cmd)
-	topic := agentproto.CreateTopic(agentUUID) // 暂复用 create topic，后续可扩展
-	b.client.Publish(topic+"_destroy", 1, false, payload)
+	topic := agentproto.DestroyTopic(agentUUID)
+	if token := b.client.Publish(topic, 1, false, payload); token.Wait() && token.Error() != nil {
+		slog.Error("publish destroy command failed", "error", token.Error(), "match_id", matchID)
+		http.Error(w, "internal error", http.StatusInternalServerError)
+		return
+	}
 
-	// 标记状态为 error（前端销毁等同于强制终止）
-	b.pool.Exec(r.Context(),
-		`UPDATE mr1v1_match SET state='error', update_time=NOW() WHERE match_id=$1`, matchID)
-
+	slog.Info("dispatched destroy command", "match_id", matchID, "force", force, "agent", agentUUID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 }
