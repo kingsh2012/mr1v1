@@ -138,8 +138,12 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 		}
 		b.pool.Exec(ctx,
 			`UPDATE mr1v1_match SET state='timeout', update_time=NOW() WHERE match_id=$1`, m.matchID)
-		b.writeLog(m.matchID, "platform", "timeout_destroy",
-			fmt.Sprintf(`{"prev_state":"%s","waiting_sec":%d,"playing_sec":%d}`, m.state, waitSec, playSec))
+		b.writeLog(m.matchID, "platform", "timeout_destroy", map[string]any{
+				"prev_state":   m.state,
+				"agent_uuid":   m.agentUUID,
+				"waiting_sec":  waitSec,
+				"playing_sec":  playSec,
+			})
 	}
 }
 
@@ -198,8 +202,7 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 			`UPDATE mr1v1_match SET state='error', update_time=NOW()
 			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','timeout','error')`,
 			status.MatchID)
-		b.writeLog(status.MatchID, "agent", "container_stopped",
-			fmt.Sprintf(`{"port":%d,"message":"%s"}`, status.Port, status.Message))
+		b.writeLog(status.MatchID, "agent", "container_stopped", status)
 		return
 	default:
 		return
@@ -210,8 +213,7 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	); err != nil {
 		slog.Error("update match state failed", "error", err, "match_id", status.MatchID)
 	}
-	b.writeLog(status.MatchID, "agent", action,
-		fmt.Sprintf(`{"port":%d,"message":"%s"}`, status.Port, status.Message))
+	b.writeLog(status.MatchID, "agent", action, status)
 }
 
 type createMatchRequest struct {
@@ -290,9 +292,10 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 		// 非致命错误，不阻断响应
 	}
 
-	b.writeLog(matchID, "platform", "create_dispatched",
-		fmt.Sprintf(`{"agent":"%s","port":%d,"image":"%s","p0_steamid":"%s","p1_steamid":"%s"}`,
-			uuid, port, image, req.P0SteamID, req.P1SteamID))
+	b.writeLog(matchID, "platform", "create_dispatched", map[string]any{
+		"agent_uuid": uuid,
+		"command":    cmd,
+	})
 
 	slog.Info("dispatched create command", "match_id", matchID, "uuid", uuid, "port", port, "image", image)
 	w.Header().Set("Content-Type", "application/json")
@@ -464,7 +467,10 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 	if force {
 		action = "destroy_dispatched"
 	}
-	b.writeLog(matchID, "platform", action, fmt.Sprintf(`{"force":%v,"agent":"%s"}`, force, agentUUID))
+	b.writeLog(matchID, "platform", action, map[string]any{
+		"agent_uuid": agentUUID,
+		"command":    cmd,
+	})
 
 	slog.Info("dispatched destroy command", "match_id", matchID, "force", force, "agent", agentUUID)
 	w.Header().Set("Content-Type", "application/json")
@@ -508,12 +514,20 @@ func (b *Backend) handleMatchLogs(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(result)
 }
 
-// writeLog 写一条操作日志，非阻塞（错误只打日志不返回）。
-func (b *Backend) writeLog(matchID, actor, action, detail string) {
+// writeLog 写一条操作日志，detail 传任意可序列化结构体或 map，非阻塞。
+func (b *Backend) writeLog(matchID, actor, action string, detail any) {
+	var detailStr string
+	if detail != nil {
+		if s, ok := detail.(string); ok {
+			detailStr = s
+		} else if b, err := json.Marshal(detail); err == nil {
+			detailStr = string(b)
+		}
+	}
 	if _, err := b.pool.Exec(context.Background(),
 		`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
 		 VALUES ($1, $2, $3, $4)`,
-		matchID, actor, action, detail,
+		matchID, actor, action, detailStr,
 	); err != nil {
 		slog.Error("write operation log failed", "error", err, "action", action)
 	}
