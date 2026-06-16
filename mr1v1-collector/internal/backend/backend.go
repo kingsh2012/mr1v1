@@ -278,13 +278,16 @@ type agentRow struct {
 	Status        string    `json:"status"`
 	RehldsRunMax  int       `json:"rehlds_run_max"`
 	PortRange     string    `json:"rehlds_port_range"`
+	CreateTime    time.Time `json:"create_time"`
+	UpdateTime    time.Time `json:"update_time"`
 	HeartbeatTime time.Time `json:"heartbeat_time"`
 }
 
 func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.pool.Query(r.Context(), `
 		SELECT uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
-		       status, rehlds_run_max, rehlds_port_range, heartbeat_time
+		       status, rehlds_run_max, rehlds_port_range,
+		       create_time, update_time, heartbeat_time
 		FROM mr1v1_agent
 		ORDER BY heartbeat_time DESC
 	`)
@@ -299,7 +302,8 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		var a agentRow
 		if err := rows.Scan(&a.UUID, &a.Hostname, &a.PublicIP, &a.LocalIP,
 			&a.CPU, &a.MemMB, &a.DiskGB, &a.Status,
-			&a.RehldsRunMax, &a.PortRange, &a.HeartbeatTime); err != nil {
+			&a.RehldsRunMax, &a.PortRange,
+			&a.CreateTime, &a.UpdateTime, &a.HeartbeatTime); err != nil {
 			continue
 		}
 		result = append(result, a)
