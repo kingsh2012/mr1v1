@@ -54,9 +54,21 @@ export default function RehldsConfigPage() {
     { title: '版本', dataIndex: 'version', key: 'version' },
     {
       title: '当前激活',
+      dataIndex: 'is_active',
       key: 'is_active',
+      render: (v: boolean) => v ? <Tag color="green">激活</Tag> : <Tag>未激活</Tag>,
+    },
+    {
+      title: '创建时间',
+      dataIndex: 'create_time',
+      key: 'create_time',
+      render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm:ss'),
+    },
+    {
+      title: '操作',
+      key: 'action',
       render: (_: unknown, r: RehldsConfig) => r.is_active
-        ? <Tag color="green">当前激活</Tag>
+        ? <Button size="small" icon={<CheckCircleOutlined />} disabled>已激活</Button>
         : (
           <Popconfirm
             title="确认激活该镜像？"
@@ -67,12 +79,6 @@ export default function RehldsConfigPage() {
             <Button size="small" icon={<CheckCircleOutlined />}>激活</Button>
           </Popconfirm>
         ),
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'create_time',
-      key: 'create_time',
-      render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm:ss'),
     },
   ]
 
