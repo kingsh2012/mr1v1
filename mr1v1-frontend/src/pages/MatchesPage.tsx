@@ -179,6 +179,7 @@ function PlayersTab({ q }: { q: ServerQuery }) {
 }
 
 function RulesTab({ q, search }: { q: ServerQuery; search: string }) {
+  const [page, setPage] = useState(1)
   if (q.rules_error) return <Alert type="error" message={`查询失败：${q.rules_error}`} />
   if (!q.rules) return <Spin />
   const entries = Object.entries(q.rules.rules)
@@ -194,7 +195,7 @@ function RulesTab({ q, search }: { q: ServerQuery; search: string }) {
         { title: '参数名', dataIndex: 'key', key: 'key', width: '40%' },
         { title: '值', dataIndex: 'value', key: 'value' },
       ]}
-      pagination={{ pageSize: 20, size: 'small' }}
+      pagination={{ pageSize: 20, size: 'small', current: page, onChange: setPage }}
       locale={{ emptyText: '无匹配参数' }}
     />
   )
