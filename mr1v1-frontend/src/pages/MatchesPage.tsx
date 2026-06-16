@@ -341,20 +341,24 @@ export default function MatchesPage() {
         </Space>
       )
 
+    const svrDisabled = !ACTIVE_STATES.has(record.state)
+
     return (
       <div style={{ padding: '8px 48px' }}>
         <Tabs
           size="small"
           tabBarExtraContent={
-            <Tooltip title="刷新服务器数据">
-              <Button size="small" icon={<ReloadOutlined />} onClick={() => refreshServer(mid)} />
-            </Tooltip>
+            !svrDisabled && (
+              <Tooltip title="刷新服务器数据">
+                <Button size="small" icon={<ReloadOutlined />} onClick={() => refreshServer(mid)} />
+              </Tooltip>
+            )
           }
           items={[
             { key: 'logs', label: '操作日志', children: logTab },
-            { key: 'server', label: '服务器信息', children: svrTab },
-            { key: 'players', label: '在线玩家', children: plrTab },
-            { key: 'rules', label: '服务器参数', children: ruleTab },
+            { key: 'server', label: '服务器信息', disabled: svrDisabled, children: svrTab },
+            { key: 'players', label: '在线玩家', disabled: svrDisabled, children: plrTab },
+            { key: 'rules', label: '服务器参数', disabled: svrDisabled, children: ruleTab },
           ]}
         />
       </div>
