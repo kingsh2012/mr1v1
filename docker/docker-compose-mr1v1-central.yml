@@ -1,6 +1,6 @@
 services:
   mr1v1-consumer:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.0.1
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.0
     container_name: mr1v1-consumer
     restart: unless-stopped
     network_mode: host
@@ -19,12 +19,12 @@ services:
       - DB_TIMEZONE=Asia/Shanghai
 
   mr1v1-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.0.1
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.1.0
     container_name: mr1v1-backend
     restart: unless-stopped
     network_mode: host
     environment:
-      - HTTP_LISTEN=0.0.0.0:8080
+      - HTTP_LISTEN=0.0.0.0:8181
       - MQTT_BROKER=tcp://10.2.8.8:1883
       - MQTT_CLIENT_ID=mr1v1-backend-prod
       - MQTT_USER=saas
