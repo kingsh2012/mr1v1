@@ -14,11 +14,35 @@ export LD_LIBRARY_PATH="$SCRIPT_DIR:$LD_LIBRARY_PATH"
 
 # hostname 含空格，引擎的 +hostname 命令行参数无法正确传递（按空格截断），
 # 故改为 sed 写入 server.cfg；rcon_password 为统一管理一并放在这里
-if [ -n "$SERVER_HOSTNAME" ]; then
-  sed -i "s/^hostname .*/hostname \"$SERVER_HOSTNAME\"/" "$SCRIPT_DIR/cstrike/server.cfg"
+# SERVER_NAME 为agent按局注入的服务器显示名，与手动维护的SERVER_HOSTNAME二选一(优先SERVER_NAME)
+HOSTNAME_OVERRIDE="${SERVER_NAME:-$SERVER_HOSTNAME}"
+if [ -n "$HOSTNAME_OVERRIDE" ]; then
+  sed -i "s/^hostname .*/hostname \"$HOSTNAME_OVERRIDE\"/" "$SCRIPT_DIR/cstrike/server.cfg"
 fi
 if [ -n "$RCON_PASSWORD" ]; then
   sed -i "s/^rcon_password .*/rcon_password \"$RCON_PASSWORD\"/" "$SCRIPT_DIR/cstrike/server.cfg"
+fi
+
+# 比赛模式：agent按局创建容器时注入 MATCH_ID/P0_STEAMID/P1_STEAMID，
+# 写入 mr1v1_match.sma 在 plugin_init 时读取的配置文件，三者齐备才生效，
+# 否则维持现有手动 .start 流程（见 AGENT_ARCHITECTURE_DESIGN.md 第6节）
+MATCH_MODE_INI="$SCRIPT_DIR/cstrike/addons/amxmodx/configs/mr1v1_match_mode.ini"
+if [ -n "$MATCH_ID" ] && [ -n "$P0_STEAMID" ] && [ -n "$P1_STEAMID" ]; then
+  cat > "$MATCH_MODE_INI" <<EOF
+; 比赛模式配置，由start.sh按容器环境变量生成，请勿手动编辑
+mr1v1_match_id = $MATCH_ID
+mr1v1_p0_steamid = $P0_STEAMID
+mr1v1_p1_steamid = $P1_STEAMID
+EOF
+else
+  rm -f "$MATCH_MODE_INI"
+fi
+
+# GATEWAY_HTTP 为agent注入的完整上报地址(.../record)，mr1v1.ini的mr1v1_gateway_http
+# 不含/record后缀(由ReportEvent拼接)，这里去掉末尾的/record再写入
+if [ -n "$GATEWAY_HTTP" ]; then
+  sed -i "s#^mr1v1_gateway_http.*#mr1v1_gateway_http = ${GATEWAY_HTTP%/record}#" \
+    "$SCRIPT_DIR/cstrike/addons/amxmodx/configs/mr1v1.ini"
 fi
 
 # 外部cvar覆盖：如果 config-overrides/server.cfg 存在（通常由外部volume挂载提供），

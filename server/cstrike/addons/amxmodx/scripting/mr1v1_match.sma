@@ -124,7 +124,22 @@ new g_szMapName[32];
 new const g_matchIdChars[] = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ";
 new g_szMatchId[33];
 
+// 比赛模式：容器由平台agent按局创建，启动时已知match_id和双方steamid
+// （configs/mr1v1_match_mode.ini，由start.sh按环境变量写入），双方玩家进入后
+// 自动分队/自动开局，跳过.start手动流程；非指定玩家强制观察者
+new bool:g_bMatchModeEnabled;
+new g_szMatchModeId[33];
+new g_szMatchModeSteamId[2][35];
+new TeamName:g_eMatchModeTeam[2];
+new bool:g_bMatchModeConnected[2];
+new g_iMatchModePlayer[2];
+
 GenerateMatchId() {
+	if (g_bMatchModeEnabled && strlen(g_szMatchModeId)) {
+		copy(g_szMatchId, charsmax(g_szMatchId), g_szMatchModeId);
+		return;
+	}
+
 	new buf[MATCH_ID_RAND_LEN + 1], raw[48];
 	for (new i = 0; i < MATCH_ID_RAND_LEN; i++) {
 		buf[i] = g_matchIdChars[random_num(0, charsmax(g_matchIdChars) - 1)];
@@ -169,6 +184,10 @@ public plugin_init() {
 	register_concmd("mr1v1_start_bot_test", "CmdConsoleStartBotTest", 0, "- 补一个专家Bot并以加速模式开始比赛(测试用)");
 	register_concmd("mr1v1_stop", "CmdConsoleStop", 0, "- 停止当前进行中的比赛");
 
+	// 比赛模式下由平台agent在比赛结束(mr1v1_match_end)后通过RCON触发，
+	// 广播倒计时后踢出所有玩家，agent随后docker stop/rm销毁本容器
+	register_srvcmd("mr1v1_match_destroy", "CmdRconDestroy");
+
 	g_hookAddItem = RegisterHookChain(RG_CBasePlayer_AddPlayerItem, "CBasePlayer_AddPlayerItem_Pre", false);
 	RegisterHookChain(RG_CBasePlayer_Spawn, "CBasePlayer_Spawn_Post", true);
 	RegisterHookChain(RG_CBasePlayer_OnSpawnEquip, "CBasePlayer_OnSpawnEquip_Pre", false);
@@ -194,6 +213,7 @@ public plugin_init() {
 	g_pCvarRespawnImmunity = get_cvar_pointer("mp_respawn_immunitytime");
 
 	LoadGatewayConfig();
+	LoadMatchModeConfig();
 	get_mapname(g_szMapName, charsmax(g_szMapName));
 
 	// 部分地图自带武器/弹药拾取物（如 ak47_m4a1_dust），持续清除（含拾取后重新生成的情况），
@@ -245,6 +265,69 @@ LoadGatewayConfig() {
 }
 
 // ------------------------------------------------------------
+// 比赛模式配置加载（agent按局创建容器时注入，由start.sh写入）
+// ------------------------------------------------------------
+
+LoadMatchModeConfig() {
+	new fh, path[128], text[128], key[64], value[128];
+	get_configsdir(path, charsmax(path));
+	formatex(path, charsmax(path), "%s/mr1v1_match_mode.ini", path);
+
+	if (!file_exists(path)) {
+		return;
+	}
+
+	fh = fopen(path, "rt");
+	if (!fh) {
+		return;
+	}
+
+	while (!feof(fh)) {
+		fgets(fh, text, charsmax(text));
+		trim(text);
+
+		if (!strlen(text) || text[0] == ';' || (text[0] == '/' && text[1] == '/')) {
+			continue;
+		}
+
+		split(text, key, charsmax(key), value, charsmax(value), "=");
+		trim(key);
+		trim(value);
+
+		if (equali(key, "mr1v1_match_id")) {
+			copy(g_szMatchModeId, charsmax(g_szMatchModeId), value);
+		} else if (equali(key, "mr1v1_p0_steamid")) {
+			copy(g_szMatchModeSteamId[0], charsmax(g_szMatchModeSteamId[]), value);
+		} else if (equali(key, "mr1v1_p1_steamid")) {
+			copy(g_szMatchModeSteamId[1], charsmax(g_szMatchModeSteamId[]), value);
+		}
+	}
+
+	fclose(fh);
+
+	if (!strlen(g_szMatchModeId) || !strlen(g_szMatchModeSteamId[0]) || !strlen(g_szMatchModeSteamId[1])) {
+		log_amx("MR1V1_MATCH_MODE_CONFIG_INCOMPLETE match_id=%s p0=%s p1=%s",
+			g_szMatchModeId, g_szMatchModeSteamId[0], g_szMatchModeSteamId[1]);
+		return;
+	}
+
+	g_bMatchModeEnabled = true;
+	set_cvar_num("bot_quota", 0);
+
+	// 第1局T/CT分边随机决定一次，之后每回合互换沿用既有逻辑(RoundEnd_Post)
+	if (random(2) == 0) {
+		g_eMatchModeTeam[0] = TEAM_TERRORIST;
+		g_eMatchModeTeam[1] = TEAM_CT;
+	} else {
+		g_eMatchModeTeam[0] = TEAM_CT;
+		g_eMatchModeTeam[1] = TEAM_TERRORIST;
+	}
+
+	log_amx("MR1V1_MATCH_MODE_ENABLED match_id=%s p0=%s p1=%s",
+		g_szMatchModeId, g_szMatchModeSteamId[0], g_szMatchModeSteamId[1]);
+}
+
+// ------------------------------------------------------------
 // 清除地图自带的武器/弹药拾取实体
 // ------------------------------------------------------------
 
@@ -282,6 +365,11 @@ public Task_RemoveMapWeapons() {
 // ------------------------------------------------------------
 
 public CmdStart(const id) {
+	if (g_bMatchModeEnabled) {
+		client_print_color(id, print_team_grey, "^4[1v1] ^1比赛模式：双方玩家就位后将自动开始，无需手动启动");
+		return PLUGIN_HANDLED;
+	}
+
 	new name[32];
 	get_user_name(id, name, charsmax(name));
 	log_amx("MR1V1_CMD_START by=%s(%d) match_active=%d", name, id, g_bMatchActive);
@@ -297,6 +385,11 @@ public CmdStart(const id) {
 }
 
 public CmdConsoleStart(const id, const level, const cid) {
+	if (g_bMatchModeEnabled) {
+		console_print(id, "[1v1] 比赛模式：双方玩家就位后将自动开始，无需手动启动");
+		return PLUGIN_HANDLED;
+	}
+
 	if (g_bMatchActive) {
 		console_print(id, "[1v1] 比赛已经在进行中");
 		return PLUGIN_HANDLED;
@@ -332,6 +425,11 @@ GetMatchRequester(const id) {
 // requester为已在T/CT的真人：该玩家留下对战，其余真人设为观察者，补1个专家难度Bot陪练；
 // testMode=true 时会缩短回合时间/冻结时间，方便快速跑完比赛做测试
 StartWithBot(bool:testMode, const requester) {
+	if (g_bMatchModeEnabled) {
+		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛模式下不支持Bot陪练");
+		return;
+	}
+
 	if (g_bMatchActive) {
 		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛已经在进行中");
 		return;
@@ -487,12 +585,16 @@ ShowHelpMenu(const id) {
 	new menu = menu_create("\y[1v1] 命令菜单", "HelpMenuHandler");
 
 	if (!g_bMatchActive) {
-		menu_additem(menu, "开始比赛 (.start)", "start", 0);
-		menu_additem(menu, "开始比赛+Bot陪练 (.start_bot)", "start_bot", 0);
-		menu_additem(menu, "测试模式+Bot (.start_bot_test)", "start_bot_test", 0);
-		menu_additem(menu, "切换地图 (.map)", "map", 0);
-		menu_additem(menu, "刷新服务器 (.refresh)", "refresh", 0);
-		menu_additem(menu, "硬重启服务器 (.hardreset)", "hardreset", 0);
+		if (g_bMatchModeEnabled) {
+			menu_additem(menu, "比赛模式：等待双方玩家就位，将自动开始", "", 0);
+		} else {
+			menu_additem(menu, "开始比赛 (.start)", "start", 0);
+			menu_additem(menu, "开始比赛+Bot陪练 (.start_bot)", "start_bot", 0);
+			menu_additem(menu, "测试模式+Bot (.start_bot_test)", "start_bot_test", 0);
+			menu_additem(menu, "切换地图 (.map)", "map", 0);
+			menu_additem(menu, "刷新服务器 (.refresh)", "refresh", 0);
+			menu_additem(menu, "硬重启服务器 (.hardreset)", "hardreset", 0);
+		}
 	} else {
 		if (!g_bWarmupActive && IsMatchPlayer(id)) {
 			menu_additem(menu, "选择武器 (.guns)", "guns", 0);
@@ -739,10 +841,48 @@ GenerateBotAuthId(id, buf[], len) {
 	formatex(buf, len, "BOT_%d_%06d", get_user_userid(id), random_num(0, 999999));
 }
 
+// 比赛模式：双方指定steamid玩家已通过client_putinserver自动分队完毕，
+// 直接采用其当前连接id/阵营，不做随机抽取
+bool:SelectMatchModePlayers() {
+	if (!g_bMatchModeConnected[0] || !g_bMatchModeConnected[1]
+		|| !is_user_connected(g_iMatchModePlayer[0]) || !is_user_connected(g_iMatchModePlayer[1])) {
+		log_amx("MR1V1_MATCH_MODE_SELECT_FAIL connected0=%d connected1=%d", g_bMatchModeConnected[0], g_bMatchModeConnected[1]);
+		return false;
+	}
+
+	g_iPlayer[0] = g_iMatchModePlayer[0];
+	g_iPlayer[1] = g_iMatchModePlayer[1];
+	copy(g_szAuthId[0], charsmax(g_szAuthId[]), g_szMatchModeSteamId[0]);
+	copy(g_szAuthId[1], charsmax(g_szAuthId[]), g_szMatchModeSteamId[1]);
+	g_eCurrentTeam[0] = g_eMatchModeTeam[0];
+	g_eCurrentTeam[1] = g_eMatchModeTeam[1];
+
+	new selName0[32], selName1[32];
+	get_user_name(g_iPlayer[0], selName0, charsmax(selName0));
+	get_user_name(g_iPlayer[1], selName1, charsmax(selName1));
+	copy(g_szPlayerName[0], charsmax(g_szPlayerName[]), selName0);
+	copy(g_szPlayerName[1], charsmax(g_szPlayerName[]), selName1);
+
+	arrayset(g_iWeaponChoice[g_iPlayer[0]], 0, 3);
+	arrayset(g_iWeaponChoice[g_iPlayer[1]], 0, 3);
+
+	rg_set_user_team(g_iPlayer[0], g_eCurrentTeam[0], MODEL_AUTO, true, false);
+	rg_set_user_team(g_iPlayer[1], g_eCurrentTeam[1], MODEL_AUTO, true, false);
+
+	log_amx("MR1V1_MATCH_MODE_SELECT_RESULT p0=%d(%s,%s) p1=%d(%s,%s)",
+		g_iPlayer[0], selName0, g_szAuthId[0], g_iPlayer[1], selName1, g_szAuthId[1]);
+
+	return true;
+}
+
 // 选定本局对战的两名玩家：仅从已加入T/CT的玩家中随机抽取两人，
 // 仍在选队菜单(TEAM_UNASSIGNED)或已是观察者的玩家不参与抽取，多余玩家强制设为观察者
 // 设置 g_iPlayer/g_szAuthId/g_eCurrentTeam，并重置武器选择记忆
 bool:SelectMatchPlayers() {
+	if (g_bMatchModeEnabled) {
+		return SelectMatchModePlayers();
+	}
+
 	new players[MAX_PLAYERS], num;
 	get_players(players, num, "h");
 
@@ -1416,6 +1556,42 @@ KickAllBots() {
 }
 
 // ------------------------------------------------------------
+// 容器销毁倒计时（RCON触发）
+// 比赛模式下，平台agent在收到mr1v1_match_end上报后通过RCON执行
+// mr1v1_match_destroy，本插件广播倒计时后踢出所有玩家，
+// agent随后docker stop/rm销毁本容器并释放端口
+// ------------------------------------------------------------
+
+#define TASK_DESTROY_COUNTDOWN  9999
+const MR1V1_DESTROY_COUNTDOWN_SECONDS = 5;
+new g_iDestroyCountdown;
+
+public CmdRconDestroy(const id, const level, const cid) {
+	log_amx("MR1V1_RCON_DESTROY");
+
+	g_iDestroyCountdown = MR1V1_DESTROY_COUNTDOWN_SECONDS;
+	set_task(1.0, "Task_DestroyCountdown", TASK_DESTROY_COUNTDOWN, _, _, "b");
+	return PLUGIN_HANDLED;
+}
+
+public Task_DestroyCountdown() {
+	if (g_iDestroyCountdown <= 0) {
+		remove_task(TASK_DESTROY_COUNTDOWN);
+
+		new players[MAX_PLAYERS], num;
+		get_players(players, num);
+		for (new i = 0; i < num; i++) {
+			server_cmd("kick #%d", get_user_userid(players[i]));
+		}
+		server_exec();
+		return;
+	}
+
+	client_print_color(0, print_team_grey, "^4[1v1] ^1服务器即将关闭，剩余%d秒", g_iDestroyCountdown);
+	g_iDestroyCountdown--;
+}
+
+// ------------------------------------------------------------
 // 玩家断线 / 重连 / 旁观者处理
 // ------------------------------------------------------------
 
@@ -1446,8 +1622,37 @@ public Task_AbortIfNoReconnect(slotPlus) {
 	}
 }
 
-// 根据SteamID识别掉线玩家重连，恢复其在比赛中的位置
+// 比赛模式：本局指定的双方玩家均已连入并入座对应阵营，自动进入热身->开局
+public Task_StartMatchMode() {
+	if (g_bMatchActive) {
+		return;
+	}
+
+	client_print_color(0, print_team_grey, "^4[1v1] ^1比赛模式：双方玩家已就位，准备开始");
+	log_amx("MR1V1_MATCH_MODE_BOTH_CONNECTED");
+
+	g_bTestMode = false;
+	StartWarmup();
+}
+
+// 根据SteamID识别掉线玩家重连，恢复其在比赛中的位置；
+// 比赛模式下还需识别本局指定的双方玩家是否已连入，凑齐后自动开局
 public client_authorized(id, const authid[]) {
+	if (g_bMatchModeEnabled && !g_bMatchActive) {
+		for (new slot = 0; slot < 2; slot++) {
+			if (!g_bMatchModeConnected[slot] && equal(g_szMatchModeSteamId[slot], authid)) {
+				g_bMatchModeConnected[slot] = true;
+				g_iMatchModePlayer[slot] = id;
+				log_amx("MR1V1_MATCH_MODE_PLAYER_JOIN slot=%d authid=%s id=%d", slot, authid, id);
+
+				if (g_bMatchModeConnected[0] && g_bMatchModeConnected[1]) {
+					set_task(1.0, "Task_StartMatchMode");
+				}
+				return;
+			}
+		}
+	}
+
 	if (!g_bMatchActive) {
 		return;
 	}
@@ -1463,8 +1668,26 @@ public client_authorized(id, const authid[]) {
 	}
 }
 
-// 比赛进行中，重连的对战玩家恢复队伍；非对战的第三人强制设为观察者
+// 比赛进行中，重连的对战玩家恢复队伍；非对战的第三人强制设为观察者；
+// 比赛模式下、比赛尚未开始前，本局指定玩家自动入座对应阵营，其他人强制观察者
 public client_putinserver(id) {
+	if (g_bMatchModeEnabled && !g_bMatchActive && !is_user_bot(id)) {
+		new authid[35];
+		get_user_authid(id, authid, charsmax(authid));
+
+		for (new slot = 0; slot < 2; slot++) {
+			if (equal(g_szMatchModeSteamId[slot], authid)) {
+				rg_set_user_team(id, g_eMatchModeTeam[slot], MODEL_AUTO, true, false);
+				client_print_color(id, print_team_grey, "^4[1v1] ^1比赛模式：等待双方玩家就位后自动开始");
+				return;
+			}
+		}
+
+		rg_set_user_team(id, TEAM_SPECTATOR, MODEL_AUTO, true, false);
+		client_print_color(id, print_team_grey, "^4[1v1] ^1本服务器为指定对局专用，你已被设为观察者");
+		return;
+	}
+
 	if (!g_bMatchActive || is_user_bot(id)) {
 		return;
 	}
