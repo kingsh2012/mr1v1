@@ -3,7 +3,7 @@
 数据上报由两个插件分别负责，地址均见 `configs/mr1v1.ini`（`mr1v1_gateway_http` 留空则不上报）：
 
 - `server/cstrike/addons/amxmodx/scripting/mr1v1_match.sma`：比赛流程插件，比赛开始/每回合结束/比赛结束时各上报一次（`mr1v1_match_start` / `mr1v1_round_end` / `mr1v1_match_end`）。
-- `server/cstrike/addons/amxmodx/scripting/mr1v1_telemetry.sma`：数据采集插件，与比赛流程插件解耦——通过其广播的自定义forward `mr1v1_match_start(match_id, id0, id1)` / `mr1v1_match_end(...)` 获知当前比赛上下文，期间收集命中/伤害等战斗事件，按固定周期（默认1秒）批量上报一次（`mr1v1_combat_batch`）。后续计划加入开枪、移动轨迹等事件，均会走这个插件、复用同一套批量上报机制。
+- `server/cstrike/addons/amxmodx/scripting/mr1v1_telemetry.sma`：数据采集插件，与比赛流程插件解耦——通过其广播的自定义forward `mr1v1_match_start(match_id, id0, id1)` / `mr1v1_match_end(...)` 获知当前比赛上下文，期间收集命中/伤害、开枪、移动轨迹等事件，按固定周期（默认1秒）批量上报（`mr1v1_combat_batch` / `mr1v1_shoot_batch` / `mr1v1_position_batch`）。
 
 ## 消息信封
 
@@ -146,7 +146,69 @@ body为统一信封：
 | `events[].damage` | 本次命中造成的伤害（护甲减免前，四舍五入取整） |
 | `events[].hitgroup` | 命中部位：`1`=头 `2`=胸 `3`=腹 `4`/`5`=左右臂 `6`/`7`=左右腿（HL引擎`HIT_*`常量） |
 
-**后续计划**：开枪事件、玩家移动轨迹采集，均会新增 `type`（如 `mr1v1_shoot_batch` / `mr1v1_position_batch`），复用本插件的批量上报机制。
+## mr1v1_shoot_batch
+
+由 `mr1v1_telemetry.sma` 上报。**触发时机**：比赛进行期间，每隔1秒（事件缓冲区满则提前）打包上报一批开枪事件；
+比赛结束（`mr1v1_match_end` forward）时会强制flush一次剩余事件。若期间没有任何开枪则不上报。
+
+开枪判定方式：通过 `RG_CBasePlayerWeapon_ItemPostFrame`（Post）比较武器实体相邻两次回调的
+`m_Weapon_iClip`（弹夹余弹），若变小则判定为打了一枪；覆盖手枪/步枪/狙击枪等所有有弹夹的武器，
+换弹（clip增加）和切枪（首次观察该武器实体）不会被误判。
+
+```json
+{
+  "match_id": "1700000000ABC123",
+  "events": [
+    {
+      "ts": 1700000000,
+      "slot": 0,
+      "weapon": "ak47",
+      "ammo_remaining": 29
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `match_id` | 对应 `mr1v1_match_start` 的 `match_id` |
+| `events` | 本批次内按发生顺序排列的开枪事件数组 |
+| `events[].ts` | 事件发生时的Unix时间戳（秒精度，同一秒内多个事件靠数组顺序排序） |
+| `events[].slot` | 开枪玩家：`0`/`1`，对应 `mr1v1_match_start` 的 `p0`/`p1` |
+| `events[].weapon` | 开枪武器classname（去掉`weapon_`前缀，如`ak47`/`usp`） |
+| `events[].ammo_remaining` | 开枪后弹夹剩余子弹数 |
+
+## mr1v1_position_batch
+
+由 `mr1v1_telemetry.sma` 上报。**触发时机**：比赛进行期间，每隔1秒对双方各采样一次坐标/朝向
+（仅存活玩家），与 `mr1v1_combat_batch`/`mr1v1_shoot_batch` 共用同一个1秒批量周期；
+比赛结束（`mr1v1_match_end` forward）时会强制flush一次剩余事件。若期间没有任何采样（如双方均未存活）则不上报。
+
+```json
+{
+  "match_id": "1700000000ABC123",
+  "events": [
+    {
+      "ts": 1700000000,
+      "slot": 0,
+      "x": 123.4,
+      "y": -50.2,
+      "z": 10.0,
+      "yaw": 90.5,
+      "pitch": -5.2
+    }
+  ]
+}
+```
+
+| 字段 | 说明 |
+| --- | --- |
+| `match_id` | 对应 `mr1v1_match_start` 的 `match_id` |
+| `events` | 本批次内按采样顺序排列的位置事件数组 |
+| `events[].ts` | 采样时的Unix时间戳（秒精度） |
+| `events[].slot` | 玩家：`0`/`1`，对应 `mr1v1_match_start` 的 `p0`/`p1` |
+| `events[].x` / `events[].y` / `events[].z` | 玩家坐标（`pev_origin`） |
+| `events[].yaw` / `events[].pitch` | 玩家视角朝向（`pev_v_angle`） |
 
 ## 备注
 
