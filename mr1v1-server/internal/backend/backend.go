@@ -20,9 +20,9 @@ import (
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"mr1v1-collector/internal/agentproto"
-	"mr1v1-collector/internal/config"
-	"mr1v1-collector/pkg/a2s"
+	"mr1v1-server/internal/agentproto"
+	"mr1v1-server/internal/config"
+	"mr1v1-server/pkg/a2s"
 )
 
 //go:embed static

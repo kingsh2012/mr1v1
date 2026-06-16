@@ -1,4 +1,4 @@
-module mr1v1-collector
+module mr1v1-server
 
 go 1.25.0
 

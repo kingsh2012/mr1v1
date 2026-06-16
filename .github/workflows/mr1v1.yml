@@ -27,7 +27,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: mr1v1-collector/go.mod
+          go-version-file: mr1v1-server/go.mod
           cache: false
 
       - name: Restore Go cache
@@ -36,11 +36,11 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-server/go.sum') }}
           restore-keys: mr1v1-go-${{ runner.os }}-
 
       - name: Download modules
-        working-directory: mr1v1-collector
+        working-directory: mr1v1-server
         run: go mod download
 
   build-consumer:
@@ -57,7 +57,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: mr1v1-collector/go.mod
+          go-version-file: mr1v1-server/go.mod
           cache: false
 
       - name: Restore Go cache
@@ -66,14 +66,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-server/go.sum') }}
           restore-keys: mr1v1-go-${{ runner.os }}-
 
       - name: Install tools
         run: sudo apt-get install -y upx
 
       - name: Build binary
-        working-directory: mr1v1-collector
+        working-directory: mr1v1-server
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
           go build -trimpath -ldflags="-s -w" \
@@ -93,8 +93,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: mr1v1-collector
-          file: mr1v1-collector/dockerfile/Dockerfile-consumer
+          context: mr1v1-server
+          file: mr1v1-server/dockerfile/Dockerfile-consumer
           push: true
           tags: ${{ env.CONSUMER_IMAGE }}:${{ steps.meta.outputs.version }}
 
@@ -125,7 +125,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: mr1v1-collector/go.mod
+          go-version-file: mr1v1-server/go.mod
           cache: false
 
       - name: Restore Go cache
@@ -134,14 +134,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-server/go.sum') }}
           restore-keys: mr1v1-go-${{ runner.os }}-
 
       - name: Install tools
         run: sudo apt-get install -y upx
 
       - name: Build binary
-        working-directory: mr1v1-collector
+        working-directory: mr1v1-server
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
           go build -trimpath -ldflags="-s -w" \
@@ -161,8 +161,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: mr1v1-collector
-          file: mr1v1-collector/dockerfile/Dockerfile-backend
+          context: mr1v1-server
+          file: mr1v1-server/dockerfile/Dockerfile-backend
           push: true
           tags: ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
 
@@ -180,7 +180,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: mr1v1-collector/go.mod
+          go-version-file: mr1v1-server/go.mod
           cache: false
 
       - name: Restore Go cache
@@ -189,14 +189,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-server/go.sum') }}
           restore-keys: mr1v1-go-${{ runner.os }}-
 
       - name: Install tools
         run: sudo apt-get install -y upx
 
       - name: Build binary
-        working-directory: mr1v1-collector
+        working-directory: mr1v1-server
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
           go build -trimpath -ldflags="-s -w" \
@@ -216,8 +216,8 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: mr1v1-collector
-          file: mr1v1-collector/dockerfile/Dockerfile-agent
+          context: mr1v1-server
+          file: mr1v1-server/dockerfile/Dockerfile-agent
           push: true
           tags: ${{ env.AGENT_IMAGE }}:${{ steps.meta.outputs.version }}
 
@@ -235,7 +235,7 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: mr1v1-collector/go.mod
+          go-version-file: mr1v1-server/go.mod
           cache: false
 
       - name: Restore Go cache
@@ -244,14 +244,14 @@ jobs:
           path: |
             ~/.cache/go-build
             ~/go/pkg/mod
-          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-server/go.sum') }}
           restore-keys: mr1v1-go-${{ runner.os }}-
 
       - name: Install tools
         run: sudo apt-get install -y upx
 
       - name: Build binary
-        working-directory: mr1v1-collector
+        working-directory: mr1v1-server
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
           go build -trimpath -ldflags="-s -w" \
@@ -271,7 +271,7 @@ jobs:
       - name: Build and push image
         uses: docker/build-push-action@v6
         with:
-          context: mr1v1-collector
-          file: mr1v1-collector/dockerfile/Dockerfile-wx
+          context: mr1v1-server
+          file: mr1v1-server/dockerfile/Dockerfile-wx
           push: true
           tags: ${{ env.WX_IMAGE }}:${{ steps.meta.outputs.version }}

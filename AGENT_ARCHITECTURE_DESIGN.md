@@ -1,6 +1,6 @@
 # Agent 架构设计
 
-> 状态：**设计稿**，对应 [ROADMAP.md](./ROADMAP.md) 阶段三/四/五的重新设计。具体实现按本文档分阶段在 `mr1v1-collector/` 中落地。
+> 状态：**设计稿**，对应 [ROADMAP.md](./ROADMAP.md) 阶段三/四/五的重新设计。具体实现按本文档分阶段在 `mr1v1-server/` 中落地。
 
 ## 1. 背景与目标
 
@@ -52,7 +52,7 @@
 
 | 模块 | 职责 |
 |------|------|
-| 遥测转发（gateway） | 沿用`mr1v1-collector/internal/gateway`：`POST /record` → 内存队列 → 发布到`mr1v1/{match_id}` |
+| 遥测转发（gateway） | 沿用`mr1v1-server/internal/gateway`：`POST /record` → 内存队列 → 发布到`mr1v1/{match_id}` |
 | 心跳 | 定期上报`host_id`、`public_ip`、`private_ip`、可用端口范围、当前占用端口 |
 | 建房指令接收 | 订阅平台下发的建房指令：`match_id`、`server_name`、`port`、`p0_steamid`、`p1_steamid`、镜像tag |
 | 容器生命周期 | 挂载`/var/run/docker.sock`，用Docker Go SDK `docker run`（注入环境变量）/ `docker stop`+`docker rm` |
@@ -110,7 +110,7 @@ agent通过Docker SDK创建rehlds容器时注入：
 
 原"每日定时硬重启"机制保留作为**未分配比赛的空闲容器**维护手段的设计参考（具体是否需要在ephemeral模型下保留待后续评估）。
 
-## 8. 平台后端职责（属于本仓库 `mr1v1-collector/` 范围）
+## 8. 平台后端职责（属于本仓库 `mr1v1-server/` 范围）
 
 - 撮合完成后生成`match_id`（UUID）
 - 维护agent注册表：订阅`mr1v1-agent/+/heartbeat`，记录每台agent的在线状态、IP、端口占用

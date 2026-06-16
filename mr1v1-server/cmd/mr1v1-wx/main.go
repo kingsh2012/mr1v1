@@ -4,9 +4,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	wxconfig "mr1v1-collector/internal/wxserver/config"
-	"mr1v1-collector/internal/wxserver/handlers"
-	"mr1v1-collector/internal/wxserver/matchmaker"
+	wxconfig "mr1v1-server/internal/wxserver/config"
+	"mr1v1-server/internal/wxserver/handlers"
+	"mr1v1-server/internal/wxserver/matchmaker"
 )
 
 func main() {

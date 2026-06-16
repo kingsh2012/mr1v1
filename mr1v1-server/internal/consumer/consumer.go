@@ -14,10 +14,10 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"mr1v1-collector/internal/agentproto"
-	"mr1v1-collector/internal/config"
-	"mr1v1-collector/internal/envelope"
-	"mr1v1-collector/internal/model"
+	"mr1v1-server/internal/agentproto"
+	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/envelope"
+	"mr1v1-server/internal/model"
 )
 
 // Consumer 持有DB连接池和MQTT客户端。

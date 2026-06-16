@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"os"
 
-	"mr1v1-collector/internal/config"
-	"mr1v1-collector/internal/gateway"
+	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/gateway"
 )
 
 func main() {

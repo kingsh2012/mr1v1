@@ -24,7 +24,7 @@
 
 ---
 
-## 二、已实现（Go侧，独立项目 `mr1v1-collector/`）
+## 二、已实现（Go侧，独立项目 `mr1v1-server/`）
 
 与历史的 `PROCS.PRO-REHLDS-COLLECTION-SYSTEM` 完全解耦，是一个新的独立Go module（`go 1.22`），覆盖新信封格式和全部6种事件类型：
 
@@ -44,7 +44,7 @@
 对应 [ROADMAP.md](./ROADMAP.md) 阶段三/四/五的重新设计，核心变化：
 - **集中化部署拓扑**：mosquitto + postgres + consumer + 平台后端集中部署一套；每台rehlds主机只跑一个**agent**进程
 - **agent职责**：遥测转发（沿用`internal/gateway`）+ 心跳上报（host_id/公网IP/内网IP/可用端口范围）+ 接收平台下发的建房指令 + 挂载`docker.sock`管理rehlds容器生命周期 + RCON客户端（注入比赛模式参数/触发销毁倒计时）
-- **平台后端**（属于本仓库`mr1v1-collector`范围）：撮合后生成`match_id`、维护agent在线状态/端口占用、下发建房指令到对应agent
+- **平台后端**（属于本仓库`mr1v1-server`范围）：撮合后生成`match_id`、维护agent在线状态/端口占用、下发建房指令到对应agent
 - **容器生命周期**：从"常驻+每日定时硬重启"转为"按局ephemeral创建/销毁"
 - **amxx"比赛模式"**：容器启动时通过环境变量注入`match_id`+双方steamid，`start.sh`写入配置文件，插件检测到指定玩家加入后自动分队开局；比赛结束RCON触发倒计时→kick→agent执行`docker stop/rm`释放端口
 
@@ -57,4 +57,4 @@
 ---
 
 ## 小结
-**AMXX游戏端**采集能力已全部到位（命中/伤害/开枪/轨迹四类事件，待commit）。**`mr1v1-collector`** 完成了gateway→MQTT→consumer→PostgreSQL全链路的代码实现并通过编译，端到端docker验证待做。下一阶段的主要工作量在**控制面/agent架构**：集中化的MQTT/PG/平台后端 + 每台主机的agent（遥测转发+心跳+容器调度+RCON）+ amxx比赛模式状态机，详见[AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)。
+**AMXX游戏端**采集能力已全部到位（命中/伤害/开枪/轨迹四类事件，待commit）。**`mr1v1-server`** 完成了gateway→MQTT→consumer→PostgreSQL全链路的代码实现并通过编译，端到端docker验证待做。下一阶段的主要工作量在**控制面/agent架构**：集中化的MQTT/PG/平台后端 + 每台主机的agent（遥测转发+心跳+容器调度+RCON）+ amxx比赛模式状态机，详见[AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)。

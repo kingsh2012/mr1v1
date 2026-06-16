@@ -6,8 +6,8 @@ import (
 	"os/signal"
 	"syscall"
 
-	"mr1v1-collector/internal/config"
-	"mr1v1-collector/internal/consumer"
+	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/consumer"
 )
 
 func main() {

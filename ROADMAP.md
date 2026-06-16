@@ -69,7 +69,7 @@
 - agent内置RCON client，支持：
   - 向rehlds容器下发"比赛模式"参数（match_id + 双方steamid）
   - 比赛结束后触发倒计时广播 + kick玩家
-- agent沿用`mr1v1-collector/internal/gateway`实现遥测转发（`/record` → 集中MQTT）
+- agent沿用`mr1v1-server/internal/gateway`实现遥测转发（`/record` → 集中MQTT）
 - 联调验证完整数据链路：插件上报 → agent(gateway) → 集中MQTT → consumer → DB
 
 **产出物：** agent进程（遥测转发+RCON模块）+ 数据链路联调验证
@@ -97,7 +97,7 @@
 
 > 部署拓扑：mosquitto + postgres + consumer + 平台后端**集中部署一套**；每台rehlds主机只跑一个agent（详见[AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)）。
 
-- 平台后端（本仓库`mr1v1-collector`范围内）：
+- 平台后端（本仓库`mr1v1-server`范围内）：
   - 撮合完成后生成`match_id`
   - 订阅各agent心跳（host_id、公网/内网IP、可用端口范围、忙碌端口），维护agent在线状态和资源视图
   - 选择空闲agent，通过MQTT下发建房指令（server_name、port、match_id、双方steamid）

@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	"github.com/google/uuid"
-	"mr1v1-collector/internal/wxserver/config"
+	"mr1v1-server/internal/wxserver/config"
 )
 
 var (

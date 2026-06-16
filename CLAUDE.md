@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **这些历史目录仅作架构/逻辑参考，1v1平台不需要照搬PROCS.PRO的设计**：赛制、插件结构、启动方式等1v1有自己的规则和实现（如下文 `mr1v1_match.sma`），遇到与PROCS.PRO参考资料不一致的地方，以1v1当前实现和讨论结论为准。
 
-**`mr1v1-collector/` 是1v1平台新的独立数据采集Go module**（gateway+consumer，已实现并通过编译，与`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`完全解耦），后续控制面（agent化、容器调度、平台后端）也会在这个module里实现，设计见 [AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)，整体进度见 [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)。`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`（gateway/consumer/api）是历史5v5平台的对应实现，仅供逻辑参考，不再扩展。
+**`mr1v1-server/` 是1v1平台新的独立数据采集Go module**（gateway+consumer，已实现并通过编译，与`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`完全解耦），后续控制面（agent化、容器调度、平台后端）也会在这个module里实现，设计见 [AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)，整体进度见 [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)。`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`（gateway/consumer/api）是历史5v5平台的对应实现，仅供逻辑参考，不再扩展。
 
 ## 当前核心：1v1比赛插件 mr1v1_match.sma
 

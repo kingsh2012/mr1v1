@@ -17,12 +17,12 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 
-	"mr1v1-collector/internal/agentproto"
-	"mr1v1-collector/internal/config"
-	"mr1v1-collector/internal/dockerctl"
-	"mr1v1-collector/internal/envelope"
-	"mr1v1-collector/internal/gateway"
-	"mr1v1-collector/internal/rcon"
+	"mr1v1-server/internal/agentproto"
+	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/dockerctl"
+	"mr1v1-server/internal/envelope"
+	"mr1v1-server/internal/gateway"
+	"mr1v1-server/internal/rcon"
 )
 
 const (

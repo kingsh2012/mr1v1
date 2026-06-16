@@ -9,7 +9,7 @@ import (
 	"net/http"
 	"sync"
 
-	"mr1v1-collector/internal/wxserver/models"
+	"mr1v1-server/internal/wxserver/models"
 )
 
 type Matchmaker struct {

@@ -10,8 +10,8 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 
-	"mr1v1-collector/internal/config"
-	"mr1v1-collector/internal/envelope"
+	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/envelope"
 )
 
 // Server 持有HTTP handler和MQTT发布所需的状态。

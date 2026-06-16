@@ -5,8 +5,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
-	"mr1v1-collector/internal/wxserver/matchmaker"
-	"mr1v1-collector/internal/wxserver/models"
+	"mr1v1-server/internal/wxserver/matchmaker"
+	"mr1v1-server/internal/wxserver/models"
 )
 
 var upgrader = websocket.Upgrader{
