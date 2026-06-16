@@ -107,6 +107,19 @@ jobs:
         id: meta
         run: echo "version=${GITHUB_REF#refs/tags/mr1v1-backend-v}" >> "$GITHUB_OUTPUT"
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: mr1v1-frontend/package-lock.json
+
+      - name: Build frontend
+        working-directory: mr1v1-frontend
+        run: |
+          npm ci
+          npm run build
+
       - name: Setup Go
         uses: actions/setup-go@v5
         with:

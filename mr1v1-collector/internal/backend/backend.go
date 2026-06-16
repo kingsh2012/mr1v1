@@ -5,11 +5,15 @@ package backend
 import (
 	"context"
 	"crypto/rand"
+	"embed"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"log/slog"
 	"net/http"
+	"strconv"
+	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -18,6 +22,9 @@ import (
 	"mr1v1-collector/internal/agentproto"
 	"mr1v1-collector/internal/config"
 )
+
+//go:embed static
+var staticFiles embed.FS
 
 // Backend 持有MQTT连接和PG连接池，提供HTTP API。
 type Backend struct {
@@ -72,9 +79,18 @@ func (b *Backend) Close() {
 // Handler 返回HTTP API路由。
 func (b *Backend) Handler() http.Handler {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /matches", b.handleCreateMatch)
-	mux.HandleFunc("GET /agents", b.handleListAgents)
-	mux.HandleFunc("GET /healthz", b.handleHealthz)
+	// 比赛
+	mux.HandleFunc("POST /api/matches", b.handleCreateMatch)
+	// Agent 管理
+	mux.HandleFunc("GET /api/agents", b.handleListAgents)
+	mux.HandleFunc("PATCH /api/agents/{uuid}", b.handleUpdateAgent)
+	// Rehlds 镜像配置
+	mux.HandleFunc("GET /api/rehlds-configs", b.handleListRehldsConfigs)
+	mux.HandleFunc("POST /api/rehlds-configs", b.handleCreateRehldsConfig)
+	mux.HandleFunc("PATCH /api/rehlds-configs/{id}/activate", b.handleActivateRehldsConfig)
+	// 健康检查 & 静态文件
+	mux.HandleFunc("GET /api/healthz", b.handleHealthz)
+	mux.Handle("/", b.staticHandler())
 	return mux
 }
 
@@ -294,6 +310,152 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// handleUpdateAgent 更新 agent 的可配置字段（status/rehlds_run_max/rehlds_port_range）。
+func (b *Backend) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
+	uuid := r.PathValue("uuid")
+	var req struct {
+		Status       *string `json:"status"`
+		RehldsRunMax *int    `json:"rehlds_run_max"`
+		PortRange    *string `json:"rehlds_port_range"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+
+	sets := []string{}
+	args := []any{}
+	n := 1
+	if req.Status != nil {
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
+	}
+	if req.RehldsRunMax != nil {
+		sets = append(sets, fmt.Sprintf("rehlds_run_max=$%d", n))
+		args = append(args, *req.RehldsRunMax)
+		n++
+	}
+	if req.PortRange != nil {
+		sets = append(sets, fmt.Sprintf("rehlds_port_range=$%d", n))
+		args = append(args, *req.PortRange)
+		n++
+	}
+	if len(sets) == 0 {
+		http.Error(w, "nothing to update", http.StatusBadRequest)
+		return
+	}
+	sets = append(sets, "update_time=NOW()")
+	args = append(args, uuid)
+
+	q := fmt.Sprintf("UPDATE mr1v1_agent SET %s WHERE uuid=$%d", strings.Join(sets, ","), n)
+	if _, err := b.pool.Exec(r.Context(), q, args...); err != nil {
+		slog.Error("update agent failed", "error", err, "uuid", uuid)
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+type rehldsConfigRow struct {
+	ID         int64     `json:"id"`
+	Image      string    `json:"image"`
+	Version    string    `json:"version"`
+	IsActive   bool      `json:"is_active"`
+	CreateTime time.Time `json:"create_time"`
+}
+
+func (b *Backend) handleListRehldsConfigs(w http.ResponseWriter, r *http.Request) {
+	rows, err := b.pool.Query(r.Context(),
+		`SELECT id, image, version, is_active, create_time FROM mr1v1_rehlds_config ORDER BY id DESC`)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var result []rehldsConfigRow
+	for rows.Next() {
+		var c rehldsConfigRow
+		if err := rows.Scan(&c.ID, &c.Image, &c.Version, &c.IsActive, &c.CreateTime); err != nil {
+			continue
+		}
+		result = append(result, c)
+	}
+	if result == nil {
+		result = []rehldsConfigRow{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (b *Backend) handleCreateRehldsConfig(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Image    string `json:"image"`
+		Version  string `json:"version"`
+		IsActive bool   `json:"is_active"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Image == "" {
+		http.Error(w, "image is required", http.StatusBadRequest)
+		return
+	}
+
+	ctx := r.Context()
+	if req.IsActive {
+		b.pool.Exec(ctx, `UPDATE mr1v1_rehlds_config SET is_active=FALSE`)
+	}
+	var id int64
+	err := b.pool.QueryRow(ctx,
+		`INSERT INTO mr1v1_rehlds_config (image, version, is_active) VALUES ($1,$2,$3) RETURNING id`,
+		req.Image, req.Version, req.IsActive,
+	).Scan(&id)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"id": id})
+}
+
+func (b *Backend) handleActivateRehldsConfig(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil {
+		http.Error(w, "invalid id", http.StatusBadRequest)
+		return
+	}
+	ctx := r.Context()
+	b.pool.Exec(ctx, `UPDATE mr1v1_rehlds_config SET is_active=FALSE`)
+	if _, err := b.pool.Exec(ctx, `UPDATE mr1v1_rehlds_config SET is_active=TRUE WHERE id=$1`, id); err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+}
+
+// staticHandler 服务嵌入的前端静态文件，未匹配的路径返回 index.html（SPA路由）。
+func (b *Backend) staticHandler() http.Handler {
+	sub, err := fs.Sub(staticFiles, "static")
+	if err != nil {
+		// static 目录不存在时返回占位响应
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			http.Error(w, "frontend not built", http.StatusNotFound)
+		})
+	}
+	fileServer := http.FileServer(http.FS(sub))
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 尝试直接服务文件
+		f, err := sub.(fs.ReadDirFS).Open(strings.TrimPrefix(r.URL.Path, "/"))
+		if err == nil {
+			f.(interface{ Close() error }).Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		// 文件不存在 → 返回 index.html（交给前端路由处理）
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }
 
 func generateMatchID() (string, error) {
