@@ -102,7 +102,8 @@ const STATE_COLOR: Record<string, string> = {
   waiting: 'warning',
   playing: 'blue',
   finished: 'success',
-  terminated: 'orange',
+  terminated: 'error',
+  timeout: 'orange',
   error: 'error',
 }
 
@@ -112,6 +113,7 @@ const STATE_LABEL: Record<string, string> = {
   playing: '比赛进行中',
   finished: '正常结束',
   terminated: '平台终止',
+  timeout: '超时终止',
   error: '异常',
 }
 

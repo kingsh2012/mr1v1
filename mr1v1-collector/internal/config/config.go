@@ -93,7 +93,9 @@ type BackendConfig struct {
 		SSLMode  string
 		Timezone string
 	}
-	AgentStaleSeconds int
+	AgentStaleSeconds          int
+	MatchWaitingTimeoutSeconds int
+	MatchPlayingTimeoutSeconds int
 }
 
 // autoClientID 在 MQTT_CLIENT_ID 未设置时自动生成唯一 client_id。
@@ -186,6 +188,8 @@ func LoadBackendFromEnv() *BackendConfig {
 	cfg.DB.SSLMode = envOr("DB_SSL_MODE", "disable")
 	cfg.DB.Timezone = envOr("DB_TIMEZONE", "Asia/Shanghai")
 	cfg.AgentStaleSeconds = envIntOr("AGENT_STALE_SECONDS", 30)
+	cfg.MatchWaitingTimeoutSeconds = envIntOr("MATCH_WAITING_TIMEOUT_SECONDS", 300)
+	cfg.MatchPlayingTimeoutSeconds = envIntOr("MATCH_PLAYING_TIMEOUT_SECONDS", 900)
 	return cfg
 }
 

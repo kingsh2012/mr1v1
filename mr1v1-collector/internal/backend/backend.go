@@ -30,9 +30,10 @@ var staticFiles embed.FS
 
 // Backend 持有MQTT连接和PG连接池，提供HTTP API。
 type Backend struct {
-	cfg    *config.BackendConfig
-	client mqtt.Client
-	pool   *pgxpool.Pool
+	cfg        *config.BackendConfig
+	client     mqtt.Client
+	pool       *pgxpool.Pool
+	cancelLoop context.CancelFunc
 }
 
 // New 连接MQTT broker和PostgreSQL，返回可用的Backend。
@@ -62,20 +63,84 @@ func New(cfg *config.BackendConfig) (*Backend, error) {
 	}
 
 	// 订阅status回报，仅用于日志
-	b := &Backend{cfg: cfg, client: client, pool: pool}
+	ctx, cancel := context.WithCancel(context.Background())
+	b := &Backend{cfg: cfg, client: client, pool: pool, cancelLoop: cancel}
 	if token := client.Subscribe(agentproto.StatusSubscribeFilter, 1, b.onStatus); token.Wait() && token.Error() != nil {
+		cancel()
 		client.Disconnect(250)
 		pool.Close()
 		return nil, fmt.Errorf("subscribe %s: %w", agentproto.StatusSubscribeFilter, token.Error())
 	}
+
+	go b.timeoutLoop(ctx)
 
 	return b, nil
 }
 
 // Close 断开MQTT连接并关闭PG连接池。
 func (b *Backend) Close() {
+	b.cancelLoop()
 	b.client.Disconnect(250)
 	b.pool.Close()
+}
+
+// timeoutLoop 每分钟扫一次活跃比赛，超时的自动强制销毁并标记为 timeout 状态。
+func (b *Backend) timeoutLoop(ctx context.Context) {
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			b.sweepTimeoutMatches(ctx)
+		}
+	}
+}
+
+func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
+	waitSec := b.cfg.MatchWaitingTimeoutSeconds
+	playSec := b.cfg.MatchPlayingTimeoutSeconds
+
+	rows, err := b.pool.Query(ctx, `
+		SELECT match_id, agent_uuid, state
+		FROM mr1v1_match
+		WHERE (state = 'waiting'  AND update_time < NOW() - $1 * INTERVAL '1 second')
+		   OR (state = 'playing'  AND update_time < NOW() - $2 * INTERVAL '1 second')
+		   OR (state = 'creating' AND update_time < NOW() - $1 * INTERVAL '1 second')
+	`, waitSec, playSec)
+	if err != nil {
+		slog.Error("timeout sweep query failed", "error", err)
+		return
+	}
+	defer rows.Close()
+
+	type staleMatch struct {
+		matchID   string
+		agentUUID string
+		state     string
+	}
+	var stale []staleMatch
+	for rows.Next() {
+		var m staleMatch
+		if err := rows.Scan(&m.matchID, &m.agentUUID, &m.state); err == nil {
+			stale = append(stale, m)
+		}
+	}
+
+	for _, m := range stale {
+		slog.Info("auto-timeout match", "match_id", m.matchID, "state", m.state)
+		cmd := agentproto.DestroyCommand{MatchID: m.matchID, Force: true}
+		payload, _ := json.Marshal(cmd)
+		topic := agentproto.DestroyTopic(m.agentUUID)
+		if token := b.client.Publish(topic, 1, false, payload); token.Wait() && token.Error() != nil {
+			slog.Error("publish timeout destroy failed", "error", token.Error(), "match_id", m.matchID)
+		}
+		b.pool.Exec(ctx,
+			`UPDATE mr1v1_match SET state='timeout', update_time=NOW() WHERE match_id=$1`, m.matchID)
+		b.writeLog(m.matchID, "platform", "timeout_destroy",
+			fmt.Sprintf(`{"prev_state":"%s","waiting_sec":%d,"playing_sec":%d}`, m.state, waitSec, playSec))
+	}
 }
 
 // Handler 返回HTTP API路由。

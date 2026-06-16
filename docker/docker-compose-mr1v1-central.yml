@@ -35,3 +35,5 @@ services:
       - DB_SSL_MODE=disable
       - DB_TIMEZONE=Asia/Shanghai
       - AGENT_STALE_SECONDS=30
+      - MATCH_WAITING_TIMEOUT_SECONDS=300
+      - MATCH_PLAYING_TIMEOUT_SECONDS=900
