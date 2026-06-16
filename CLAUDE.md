@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 仓库里另外三个历史目录——`PROCS.PRO-REHLDS-LINUX-PROD`（5v5服务端+插件）、`PROCS.PRO-REHLDS-STARTUP`（已弃用的Go启动器）、`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`（数据采集系统）——来自作者2020-2024年开发的 PROCS.PRO 5v5竞技平台，背景见 [PROCS.PRO_PROJECT_OVERVIEW.md](./PROCS.PRO_PROJECT_OVERVIEW.md)，阶段目标见 [ROADMAP.md](./ROADMAP.md)。
 
-**这些历史目录仅作架构/逻辑参考，1v1平台不需要照搬PROCS.PRO的设计**：赛制、插件结构、启动方式等1v1有自己的规则和实现（如下文 `mr1v1_match.sma`），遇到与PROCS.PRO参考资料不一致的地方，以1v1当前实现和讨论结论为准。其中 `PROCS.PRO-REHLDS-COLLECTION-SYSTEM`（gateway/consumer/api）仍在实际使用，1v1插件通过它上报比赛数据。
+**这些历史目录仅作架构/逻辑参考，1v1平台不需要照搬PROCS.PRO的设计**：赛制、插件结构、启动方式等1v1有自己的规则和实现（如下文 `mr1v1_match.sma`），遇到与PROCS.PRO参考资料不一致的地方，以1v1当前实现和讨论结论为准。
+
+**`mr1v1-collector/` 是1v1平台新的独立数据采集Go module**（gateway+consumer，已实现并通过编译，与`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`完全解耦），后续控制面（agent化、容器调度、平台后端）也会在这个module里实现，设计见 [AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)，整体进度见 [IMPLEMENTATION_STATUS.md](./IMPLEMENTATION_STATUS.md)。`PROCS.PRO-REHLDS-COLLECTION-SYSTEM`（gateway/consumer/api）是历史5v5平台的对应实现，仅供逻辑参考，不再扩展。
 
 ## 当前核心：1v1比赛插件 mr1v1_match.sma
 

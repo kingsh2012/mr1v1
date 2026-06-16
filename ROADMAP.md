@@ -60,45 +60,51 @@
 
 ---
 
-## 阶段三：平台控制接口
+## 阶段三：平台控制接口（agent化）
 
-**目标：** 平台后端能远程控制服务器的对局生命周期。
+**目标：** 平台后端能远程控制服务器的对局生命周期，控制面与遥测面合并为单个per-host **agent** 进程。
 
-- 封装 RCON 客户端，支持：
-  - 创建对局（加载 match cfg）
-  - 强制结束对局
-- 实现服务器 → 平台的事件上报（gateway 接收）
-- 联调验证完整数据链路：插件上报 → gateway → MQTT → consumer → DB
+> 详细设计见 [AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)。原计划中"独立RCON控制库"+"独立调度服务"合并进agent，理由：两者都需常驻每台rehlds主机、都要MQTT连接，合并可减少部署面。
 
-**产出物：** RCON 控制库 + 数据链路联调验证
+- agent内置RCON client，支持：
+  - 向rehlds容器下发"比赛模式"参数（match_id + 双方steamid）
+  - 比赛结束后触发倒计时广播 + kick玩家
+- agent沿用`mr1v1-collector/internal/gateway`实现遥测转发（`/record` → 集中MQTT）
+- 联调验证完整数据链路：插件上报 → agent(gateway) → 集中MQTT → consumer → DB
+
+**产出物：** agent进程（遥测转发+RCON模块）+ 数据链路联调验证
 
 ---
 
-## 阶段四：容器化单实例
+## 阶段四：容器化单实例（ephemeral模型）
 
-**目标：** 将单个 CS 1.6 服务器封装为 Docker 镜像，支持参数化启动。
+**目标：** 将单个 CS 1.6 服务器封装为 Docker 镜像，由agent按需创建/销毁（按局ephemeral，取代"常驻+每日定时硬重启"）。
 
 - 编写 Dockerfile（基于 ubuntu:20.04，含 32-bit libs）
-- 启动参数通过环境变量注入：`PORT`、`RCON_PASSWORD`、`MAP`、`MATCH_ID`
+- 启动参数通过环境变量注入：`PORT`、`RCON_PASSWORD`、`MAP`、`MATCH_ID`、`P0_STEAMID`、`P1_STEAMID`、`SERVER_NAME`、agent的`/record`接收地址
+- `start.sh`将上述环境变量写入配置文件（仿照现有`mr1v1.ini`的key=value写法），amxx读取后进入"比赛模式"：检测到对应steamid玩家加入后自动分队开局，禁用`.start*`/bot
+- 比赛结束：agent通过RCON触发倒计时client_print+kick，随后`docker stop`+`docker rm`释放端口
 - 健康检查：UDP 探测端口
-- 地图文件单独挂载，控制镜像体积
+- 地图文件打包进镜像（见[project_docker_packaging.md]，不使用volume挂载）
 
-**产出物：** `Dockerfile` + `docker-compose.yml`（单实例验证用）
+**产出物：** `Dockerfile`（含比赛模式env var契约） + agent的容器生命周期管理代码
 
 ---
 
-## 阶段五：多实例调度层
+## 阶段五：多实例调度层（集中化平台后端）
 
-**目标：** 支持动态按需开/关房间，对接平台后端。
+**目标：** 支持动态按需开/关房间，调度逻辑在平台后端集中实现，agent作为执行者。
 
-- 实现轻量调度服务（Go），提供 HTTP API：
-  - `POST /rooms` — 创建房间（拉起容器，分配端口）
-  - `DELETE /rooms/:id` — 销毁房间
-  - `GET /rooms/:id/status` — 查询房间状态
-- 端口池管理
-- 容器生命周期管理（Docker SDK）
+> 部署拓扑：mosquitto + postgres + consumer + 平台后端**集中部署一套**；每台rehlds主机只跑一个agent（详见[AGENT_ARCHITECTURE_DESIGN.md](./AGENT_ARCHITECTURE_DESIGN.md)）。
 
-**产出物：** 调度服务代码 + API 文档
+- 平台后端（本仓库`mr1v1-collector`范围内）：
+  - 撮合完成后生成`match_id`
+  - 订阅各agent心跳（host_id、公网/内网IP、可用端口范围、忙碌端口），维护agent在线状态和资源视图
+  - 选择空闲agent，通过MQTT下发建房指令（server_name、port、match_id、双方steamid）
+- agent侧：接收建房指令 → 挂载的`docker.sock`拉起容器（环境变量注入） → 上报建房结果
+- 端口池管理：平台后端基于agent上报的可用端口范围 + 当前占用情况分配
+
+**产出物：** 平台后端（撮合/调度/agent注册表）+ agent的MQTT指令接收与docker.sock控制代码
 
 ---
 
