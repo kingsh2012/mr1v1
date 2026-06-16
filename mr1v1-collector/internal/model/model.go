@@ -1,8 +1,42 @@
-// Package model 定义consumer写入PostgreSQL的6张表结构及建表DDL。
+// Package model 定义consumer写入PostgreSQL的表结构及建表DDL。
 package model
 
 // DDL 包含所有建表语句（IF NOT EXISTS），consumer启动时执行。
 const DDL = `
+CREATE TABLE IF NOT EXISTS mr1v1_agent (
+	uuid              VARCHAR(64)  PRIMARY KEY,
+	hostname          VARCHAR(128) NOT NULL DEFAULT '',
+	public_ip         VARCHAR(64)  NOT NULL DEFAULT '',
+	local_ip          VARCHAR(64)  NOT NULL DEFAULT '',
+	cpu               VARCHAR(128) NOT NULL DEFAULT '',
+	mem_mb            BIGINT       NOT NULL DEFAULT 0,
+	disk_gb           BIGINT       NOT NULL DEFAULT 0,
+	status            VARCHAR(16)  NOT NULL DEFAULT 'enabled',
+	rehlds_run_max    INT          NOT NULL DEFAULT 0,
+	rehlds_port_range VARCHAR(32)  NOT NULL DEFAULT '',
+	create_time       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+	update_time       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+	heartbeat_time    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mr1v1_rehlds_config (
+	id          BIGSERIAL    PRIMARY KEY,
+	image       VARCHAR(256) NOT NULL,
+	version     VARCHAR(64)  NOT NULL DEFAULT '',
+	is_active   BOOLEAN      NOT NULL DEFAULT FALSE,
+	create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS mr1v1_match_status (
+	match_id   VARCHAR(64)  PRIMARY KEY,
+	agent_uuid VARCHAR(64)  NOT NULL DEFAULT '',
+	port       INT          NOT NULL DEFAULT 0,
+	state      VARCHAR(16)  NOT NULL DEFAULT 'running',
+	create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+	update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_match_status_agent ON mr1v1_match_status(agent_uuid, state);
+
 CREATE TABLE IF NOT EXISTS mr1v1_match_start (
 	id         BIGSERIAL PRIMARY KEY,
 	match_id   VARCHAR(64) NOT NULL UNIQUE,

@@ -48,9 +48,6 @@ type ConsumerConfig struct {
 
 // AgentConfig 对应 cmd/agent。
 type AgentConfig struct {
-	HostID struct {
-		File string
-	}
 	HTTP struct {
 		Listen string
 	}
@@ -67,9 +64,6 @@ type AgentConfig struct {
 	Heartbeat struct {
 		IntervalSeconds int
 		PublicIP        string
-		PrivateIP       string
-		PortRangeStart  int
-		PortRangeEnd    int
 	}
 	Docker struct {
 		DefaultImage            string
@@ -89,6 +83,15 @@ type BackendConfig struct {
 		ClientID string
 		User     string
 		Pass     string
+	}
+	DB struct {
+		Host     string
+		Port     int
+		User     string
+		Pass     string
+		DBName   string
+		SSLMode  string
+		Timezone string
 	}
 	AgentStaleSeconds int
 }
@@ -155,19 +158,33 @@ func LoadConsumerFromEnv() *ConsumerConfig {
 //
 // 环境变量：
 //
-//	HTTP_LISTEN          (default: 0.0.0.0:8080)
+//	HTTP_LISTEN          (default: 0.0.0.0:8181)
 //	MQTT_BROKER          (default: tcp://localhost:1883)
-//	MQTT_CLIENT_ID       (default: mr1v1-backend)
+//	MQTT_CLIENT_ID       (default: 自动生成)
 //	MQTT_USER
 //	MQTT_PASS
+//	DB_HOST              (default: localhost)
+//	DB_PORT              (default: 5432)
+//	DB_USER              (default: mr1v1)
+//	DB_PASS
+//	DB_NAME              (default: mr1v1)
+//	DB_SSL_MODE          (default: disable)
+//	DB_TIMEZONE          (default: Asia/Shanghai)
 //	AGENT_STALE_SECONDS  (default: 30)
 func LoadBackendFromEnv() *BackendConfig {
 	cfg := &BackendConfig{}
-	cfg.HTTP.Listen = envOr("HTTP_LISTEN", "0.0.0.0:8080")
+	cfg.HTTP.Listen = envOr("HTTP_LISTEN", "0.0.0.0:8181")
 	cfg.MQTT.Broker = envOr("MQTT_BROKER", "tcp://localhost:1883")
 	cfg.MQTT.ClientID = envOr("MQTT_CLIENT_ID", autoClientID("mr1v1-backend"))
 	cfg.MQTT.User = envOr("MQTT_USER", "")
 	cfg.MQTT.Pass = envOr("MQTT_PASS", "")
+	cfg.DB.Host = envOr("DB_HOST", "localhost")
+	cfg.DB.Port = envIntOr("DB_PORT", 5432)
+	cfg.DB.User = envOr("DB_USER", "mr1v1")
+	cfg.DB.Pass = envOr("DB_PASS", "")
+	cfg.DB.DBName = envOr("DB_NAME", "mr1v1")
+	cfg.DB.SSLMode = envOr("DB_SSL_MODE", "disable")
+	cfg.DB.Timezone = envOr("DB_TIMEZONE", "Asia/Shanghai")
 	cfg.AgentStaleSeconds = envIntOr("AGENT_STALE_SECONDS", 30)
 	return cfg
 }
@@ -176,36 +193,27 @@ func LoadBackendFromEnv() *BackendConfig {
 //
 // 环境变量：
 //
-//	HOST_ID_FILE             (default: ./data/host_id)
-//	HTTP_LISTEN              (default: 0.0.0.0:7778)
-//	MQTT_BROKER              (default: tcp://localhost:1883)
-//	MQTT_CLIENT_ID           (default: mr1v1-agent)
+//	HTTP_LISTEN          (default: 0.0.0.0:7778)
+//	MQTT_BROKER          (default: tcp://localhost:1883)
 //	MQTT_USER
 //	MQTT_PASS
-//	QUEUE_CAPACITY           (default: 10000)
-//	HEARTBEAT_INTERVAL       (default: 10)
-//	PUBLIC_IP
-//	PRIVATE_IP
-//	PORT_RANGE_START         (default: 27015)
-//	PORT_RANGE_END           (default: 27025)
+//	QUEUE_CAPACITY       (default: 10000)
+//	HEARTBEAT_INTERVAL   (default: 10)
+//	PUBLIC_IP            (可选，不填则使用本机检测到的内网IP)
 //	DOCKER_IMAGE
-//	DOCKER_STOP_TIMEOUT      (default: 15)
-//	DESTROY_COMMAND          (default: mr1v1_match_destroy)
-//	DESTROY_COUNTDOWN        (default: 5)
+//	DOCKER_STOP_TIMEOUT  (default: 15)
+//	DESTROY_COMMAND      (default: mr1v1_match_destroy)
+//	DESTROY_COUNTDOWN    (default: 5)
 func LoadAgentFromEnv() *AgentConfig {
 	cfg := &AgentConfig{}
-	cfg.HostID.File = envOr("HOST_ID_FILE", "./data/host_id")
 	cfg.HTTP.Listen = envOr("HTTP_LISTEN", "0.0.0.0:7778")
 	cfg.MQTT.Broker = envOr("MQTT_BROKER", "tcp://localhost:1883")
-	cfg.MQTT.ClientID = envOr("MQTT_CLIENT_ID", "mr1v1-agent")
+	cfg.MQTT.TopicPrefix = envOr("MQTT_TOPIC_PREFIX", "mr1v1")
 	cfg.MQTT.User = envOr("MQTT_USER", "")
 	cfg.MQTT.Pass = envOr("MQTT_PASS", "")
 	cfg.Queue.Capacity = envIntOr("QUEUE_CAPACITY", 10000)
 	cfg.Heartbeat.IntervalSeconds = envIntOr("HEARTBEAT_INTERVAL", 10)
 	cfg.Heartbeat.PublicIP = envOr("PUBLIC_IP", "")
-	cfg.Heartbeat.PrivateIP = envOr("PRIVATE_IP", "")
-	cfg.Heartbeat.PortRangeStart = envIntOr("PORT_RANGE_START", 27015)
-	cfg.Heartbeat.PortRangeEnd = envIntOr("PORT_RANGE_END", 27025)
 	cfg.Docker.DefaultImage = envOr("DOCKER_IMAGE", "")
 	cfg.Docker.StopTimeoutSeconds = envIntOr("DOCKER_STOP_TIMEOUT", 15)
 	cfg.Docker.DestroyCommand = envOr("DESTROY_COMMAND", "mr1v1_match_destroy")

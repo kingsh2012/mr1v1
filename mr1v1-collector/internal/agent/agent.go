@@ -53,14 +53,12 @@ type Agent struct {
 	matches map[string]matchState // match_id -> {port, rcon_password}
 }
 
-// New creates an Agent: opens a single MQTT connection shared between the
-// telemetry gateway and the control plane, subscribes to this host's
-// create-command topic, and starts the heartbeat loop.
+// New creates an Agent: reads the BIOS UUID as stable identity, opens a
+// single MQTT connection shared between the telemetry gateway and the control
+// plane, subscribes to this host's create-command topic, and starts the
+// heartbeat loop.
 func New(cfg *config.AgentConfig) (*Agent, error) {
-	hostID, err := loadOrCreateHostID(cfg.HostID.File)
-	if err != nil {
-		return nil, err
-	}
+	uuid := biosUUID()
 
 	docker, err := dockerctl.New()
 	if err != nil {
@@ -69,7 +67,7 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.Broker).
-		SetClientID("mr1v1-agent-" + hostID).
+		SetClientID("mr1v1-agent-" + uuid).
 		SetAutoReconnect(true).
 		SetCleanSession(false).
 		SetConnectTimeout(10 * time.Second).
@@ -98,11 +96,11 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 		gw:      gw,
 		client:  client,
 		docker:  docker,
-		hostID:  hostID,
+		hostID:  uuid,
 		matches: make(map[string]matchState),
 	}
 
-	createTopic := agentproto.CreateTopic(hostID)
+	createTopic := agentproto.CreateTopic(uuid)
 	if token := client.Subscribe(createTopic, 1, a.onCreate); token.Wait() && token.Error() != nil {
 		a.Close()
 		return nil, fmt.Errorf("subscribe %s: %w", createTopic, token.Error())
@@ -110,7 +108,7 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 
 	go a.heartbeatLoop()
 
-	slog.Info("agent started", "host_id", hostID, "create_topic", createTopic)
+	slog.Info("agent started", "uuid", uuid, "create_topic", createTopic)
 	return a, nil
 }
 
@@ -157,7 +155,7 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 	if image == "" {
 		slog.Error("create command has no image and no default_image configured", "match_id", cmd.MatchID)
 		a.publishStatus(agentproto.StatusReport{
-			MatchID: cmd.MatchID, HostID: a.hostID, Port: cmd.Port,
+			MatchID: cmd.MatchID, UUID: a.hostID, Port: cmd.Port,
 			State: agentproto.StateError, Message: "no image specified and no default_image configured",
 			Timestamp: time.Now().Unix(),
 		})
@@ -168,7 +166,7 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 	if err != nil {
 		slog.Error("generate rcon password failed", "error", err, "match_id", cmd.MatchID)
 		a.publishStatus(agentproto.StatusReport{
-			MatchID: cmd.MatchID, HostID: a.hostID, Port: cmd.Port,
+			MatchID: cmd.MatchID, UUID: a.hostID, Port: cmd.Port,
 			State: agentproto.StateError, Message: err.Error(), Timestamp: time.Now().Unix(),
 		})
 		return
@@ -190,7 +188,7 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 	if err != nil {
 		slog.Error("create match container failed", "error", err, "match_id", cmd.MatchID)
 		a.publishStatus(agentproto.StatusReport{
-			MatchID: cmd.MatchID, HostID: a.hostID, Port: cmd.Port,
+			MatchID: cmd.MatchID, UUID: a.hostID, Port: cmd.Port,
 			State: agentproto.StateError, Message: err.Error(), Timestamp: time.Now().Unix(),
 		})
 		return
@@ -199,7 +197,7 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 	a.trackMatch(cmd.MatchID, matchState{port: cmd.Port, rconPassword: rconPassword})
 	slog.Info("match container running", "match_id", cmd.MatchID, "port", cmd.Port, "image", image)
 	a.publishStatus(agentproto.StatusReport{
-		MatchID: cmd.MatchID, HostID: a.hostID, Port: cmd.Port,
+		MatchID: cmd.MatchID, UUID: a.hostID, Port: cmd.Port,
 		State: agentproto.StateRunning, Timestamp: time.Now().Unix(),
 	})
 }
@@ -221,7 +219,7 @@ func (a *Agent) teardownMatch(matchID string) {
 	if err := a.docker.StopAndRemoveByMatchID(ctx, matchID, timeout); err != nil {
 		slog.Error("teardown match container failed", "error", err, "match_id", matchID)
 		a.publishStatus(agentproto.StatusReport{
-			MatchID: matchID, HostID: a.hostID,
+			MatchID: matchID, UUID: a.hostID,
 			State: agentproto.StateError, Message: err.Error(), Timestamp: time.Now().Unix(),
 		})
 		return
@@ -230,7 +228,7 @@ func (a *Agent) teardownMatch(matchID string) {
 	port := a.freePortForMatch(matchID)
 	slog.Info("match container torn down", "match_id", matchID, "port", port)
 	a.publishStatus(agentproto.StatusReport{
-		MatchID: matchID, HostID: a.hostID, Port: port,
+		MatchID: matchID, UUID: a.hostID, Port: port,
 		State: agentproto.StateStopped, Timestamp: time.Now().Unix(),
 	})
 }
@@ -334,22 +332,34 @@ func (a *Agent) heartbeatLoop() {
 		interval = defaultHeartbeatInterval
 	}
 
-	privateIP := a.cfg.Heartbeat.PrivateIP
-	if privateIP == "" {
-		privateIP = detectPrivateIP()
+	// 系统信息相对稳定，每10次心跳重采一次。
+	info := collectSysInfo()
+	if a.cfg.Heartbeat.PublicIP != "" {
+		info.localIP = info.localIP // keep detected
 	}
-
 	ticker := time.NewTicker(interval)
+	refreshCount := 0
 	defer ticker.Stop()
 	for {
+		if refreshCount%10 == 0 {
+			info = collectSysInfo()
+		}
+		refreshCount++
+
+		publicIP := a.cfg.Heartbeat.PublicIP
+		if publicIP == "" {
+			publicIP = info.localIP
+		}
+
 		hb := agentproto.Heartbeat{
-			HostID:         a.hostID,
-			PublicIP:       a.cfg.Heartbeat.PublicIP,
-			PrivateIP:      privateIP,
-			PortRangeStart: a.cfg.Heartbeat.PortRangeStart,
-			PortRangeEnd:   a.cfg.Heartbeat.PortRangeEnd,
-			BusyPorts:      a.busyPortsList(),
-			Timestamp:      time.Now().Unix(),
+			UUID:      a.hostID,
+			Hostname:  info.hostname,
+			PublicIP:  publicIP,
+			LocalIP:   info.localIP,
+			CPU:       info.cpu,
+			MemMB:     info.memMB,
+			DiskGB:    info.diskGB,
+			Timestamp: time.Now().Unix(),
 		}
 		payload, err := json.Marshal(hb)
 		if err != nil {

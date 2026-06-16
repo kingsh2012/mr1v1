@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"mr1v1-collector/internal/agentproto"
 	"mr1v1-collector/internal/config"
 	"mr1v1-collector/internal/envelope"
 	"mr1v1-collector/internal/model"
@@ -53,10 +54,19 @@ func New(cfg *config.ConsumerConfig) (*Consumer, error) {
 		opts.SetPassword(cfg.MQTT.Pass)
 	}
 	opts.SetOnConnectHandler(func(client mqtt.Client) {
-		if token := client.Subscribe(cfg.MQTT.Topic, 1, c.onMessage); token.Wait() && token.Error() != nil {
-			slog.Error("subscribe failed", "topic", cfg.MQTT.Topic, "error", token.Error())
-		} else {
-			slog.Info("subscribed", "topic", cfg.MQTT.Topic)
+		subs := map[string]struct {
+			qos     byte
+			handler mqtt.MessageHandler
+		}{
+			cfg.MQTT.Topic:                       {1, c.onMessage},
+			agentproto.HeartbeatSubscribeFilter:  {0, c.onHeartbeat},
+		}
+		for topic, s := range subs {
+			if token := client.Subscribe(topic, s.qos, s.handler); token.Wait() && token.Error() != nil {
+				slog.Error("subscribe failed", "topic", topic, "error", token.Error())
+			} else {
+				slog.Info("subscribed", "topic", topic)
+			}
 		}
 	})
 
@@ -202,4 +212,47 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 		slog.Warn("unknown event type, skipped", "type", env.Type, "match_id", env.MatchID)
 		return nil
 	}
+}
+
+func (c *Consumer) onHeartbeat(_ mqtt.Client, msg mqtt.Message) {
+	var hb agentproto.Heartbeat
+	if err := json.Unmarshal(msg.Payload(), &hb); err != nil {
+		slog.Error("decode heartbeat failed", "error", err)
+		return
+	}
+	if hb.UUID == "" {
+		return
+	}
+	if err := c.upsertAgent(hb); err != nil {
+		slog.Error("upsert agent failed", "error", err, "uuid", hb.UUID)
+	}
+}
+
+func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
+	_, err := c.pool.Exec(context.Background(), `
+		INSERT INTO mr1v1_agent
+			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
+			 status, rehlds_run_max, rehlds_port_range,
+			 create_time, update_time, heartbeat_time)
+		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', 0, '', NOW(), NOW(), NOW())
+		ON CONFLICT (uuid) DO UPDATE SET
+			heartbeat_time = NOW(),
+			update_time = CASE
+				WHEN mr1v1_agent.hostname  != EXCLUDED.hostname
+				  OR mr1v1_agent.public_ip != EXCLUDED.public_ip
+				  OR mr1v1_agent.local_ip  != EXCLUDED.local_ip
+				  OR mr1v1_agent.cpu       != EXCLUDED.cpu
+				  OR mr1v1_agent.mem_mb    != EXCLUDED.mem_mb
+				  OR mr1v1_agent.disk_gb   != EXCLUDED.disk_gb
+				THEN NOW()
+				ELSE mr1v1_agent.update_time
+			END,
+			hostname  = EXCLUDED.hostname,
+			public_ip = EXCLUDED.public_ip,
+			local_ip  = EXCLUDED.local_ip,
+			cpu       = EXCLUDED.cpu,
+			mem_mb    = EXCLUDED.mem_mb,
+			disk_gb   = EXCLUDED.disk_gb
+	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB)
+	return err
 }
