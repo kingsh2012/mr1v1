@@ -291,7 +291,8 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	b.writeLog(matchID, "platform", "create_dispatched",
-		fmt.Sprintf(`{"agent":"%s","port":%d,"image":"%s"}`, uuid, port, image))
+		fmt.Sprintf(`{"agent":"%s","port":%d,"image":"%s","p0_steamid":"%s","p1_steamid":"%s"}`,
+			uuid, port, image, req.P0SteamID, req.P1SteamID))
 
 	slog.Info("dispatched create command", "match_id", matchID, "uuid", uuid, "port", port, "image", image)
 	w.Header().Set("Content-Type", "application/json")
