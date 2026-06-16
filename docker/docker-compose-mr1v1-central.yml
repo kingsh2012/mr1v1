@@ -1,6 +1,6 @@
 services:
   mr1v1-consumer:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.2
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.3
     container_name: mr1v1-consumer
     restart: unless-stopped
     network_mode: host
