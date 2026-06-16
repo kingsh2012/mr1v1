@@ -1,0 +1,29 @@
+host_id:
+  file: ./data/host_id
+
+http:
+  listen: 0.0.0.0:7778
+
+mqtt:
+  # 集中部署的broker地址，由平台侧提供
+  broker: tcp://broker.internal:1883
+  topic_prefix: mr1v1
+  client_id: mr1v1-agent
+  user: ""
+  pass: ""
+
+queue:
+  capacity: 10000
+
+heartbeat:
+  interval_seconds: 10
+  # public_ip留空则不上报；private_ip留空则自动探测第一个非loopback IPv4
+  public_ip: ""
+  private_ip: ""
+  port_range_start: 27015
+  port_range_end: 27025
+
+docker:
+  # 建房指令未指定image时使用的默认镜像；agent不会pull，假定本机已存在
+  default_image: ""
+  stop_timeout_seconds: 15

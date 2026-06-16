@@ -1,0 +1,11 @@
+http:
+  listen: 0.0.0.0:8080
+
+mqtt:
+  broker: tcp://10.2.8.8:1883
+  client_id: mr1v1-backend-prod
+  user: saas
+  pass: saas
+
+# 超过这个时间没收到心跳的agent不参与撮合的空闲主机选择
+agent_stale_seconds: 30

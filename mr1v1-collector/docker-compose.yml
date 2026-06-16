@@ -1,0 +1,55 @@
+version: "3"
+
+# 中心栈：mosquitto + postgres + consumer + 平台后端，只部署一套。
+# 每台rehlds主机的agent见 docker-compose.agent.yml。
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: mr1v1-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: mr1v1-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: mr1v1
+      POSTGRES_PASSWORD: mr1v1
+      POSTGRES_DB: mr1v1
+      TZ: Asia/Shanghai
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+
+  consumer:
+    build:
+      context: .
+      dockerfile: ./dockerfile/Dockerfile-consumer
+    container_name: mr1v1-consumer
+    restart: unless-stopped
+    # 同一compose网络内通过服务名访问mosquitto/postgres，见consumer.yml
+    depends_on:
+      - mosquitto
+      - postgres
+
+  backend:
+    build:
+      context: .
+      dockerfile: ./dockerfile/Dockerfile-backend
+    container_name: mr1v1-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    depends_on:
+      - mosquitto
+
+volumes:
+  mosquitto-data:
+  postgres-data:

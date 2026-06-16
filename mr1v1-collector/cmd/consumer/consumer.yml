@@ -1,0 +1,14 @@
+mqtt:
+  broker: tcp://10.2.8.8:1883
+  topic: mr1v1/#
+  client_id: mr1v1-consumer-prod
+  user: saas
+  pass: saas
+db:
+  host: 10.2.8.8
+  port: 5433
+  user: mr1v1
+  pass: Mr1v1Db2026!
+  dbname: mr1v1
+  ssl_mode: disable
+  timezone: Asia/Shanghai
