@@ -82,6 +82,7 @@ func (b *Backend) Handler() http.Handler {
 	// 比赛
 	mux.HandleFunc("POST /api/matches", b.handleCreateMatch)
 	mux.HandleFunc("GET /api/matches", b.handleListMatches)
+	mux.HandleFunc("GET /api/matches/{id}/logs", b.handleMatchLogs)
 	mux.HandleFunc("POST /api/matches/{id}/end", b.handleEndMatch)
 	mux.HandleFunc("POST /api/matches/{id}/destroy", b.handleDestroyMatch)
 	// Agent 管理
@@ -114,18 +115,22 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	// agent running → match waiting（容器就绪，等待玩家）
 	// agent error   → match error
 	// agent stopped → 若 match 还未 finished 则标记 error
-	var newState string
+	var newState, action string
 	switch status.State {
 	case agentproto.StateRunning:
 		newState = "waiting"
+		action = "container_started"
 	case agentproto.StateError:
 		newState = "error"
+		action = "container_error"
 	case agentproto.StateStopped:
 		// 只有意外停止才标 error；finished/terminated/error 已是终态不覆盖
 		b.pool.Exec(context.Background(),
 			`UPDATE mr1v1_match SET state='error', update_time=NOW()
 			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','error')`,
 			status.MatchID)
+		b.writeLog(status.MatchID, "agent", "container_stopped",
+			fmt.Sprintf(`{"port":%d,"message":"%s"}`, status.Port, status.Message))
 		return
 	default:
 		return
@@ -136,6 +141,8 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	); err != nil {
 		slog.Error("update match state failed", "error", err, "match_id", status.MatchID)
 	}
+	b.writeLog(status.MatchID, "agent", action,
+		fmt.Sprintf(`{"port":%d,"message":"%s"}`, status.Port, status.Message))
 }
 
 type createMatchRequest struct {
@@ -214,6 +221,9 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 		// 非致命错误，不阻断响应
 	}
 
+	b.writeLog(matchID, "platform", "create_dispatched",
+		fmt.Sprintf(`{"agent":"%s","port":%d,"image":"%s"}`, uuid, port, image))
+
 	slog.Info("dispatched create command", "match_id", matchID, "uuid", uuid, "port", port, "image", image)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(createMatchResponse{MatchID: matchID, UUID: uuid, Port: port})
@@ -232,7 +242,7 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 		SELECT uuid, rehlds_port_range, rehlds_run_max
 		FROM mr1v1_agent
 		WHERE status = 'enabled'
-		  AND heartbeat_time > NOW() - ($1 || ' seconds')::INTERVAL
+		  AND heartbeat_time > NOW() - $1 * INTERVAL '1 second'
 		  AND rehlds_run_max > 0
 		  AND rehlds_port_range != ''
 		ORDER BY heartbeat_time DESC
@@ -374,9 +384,63 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 	b.pool.Exec(r.Context(),
 		`UPDATE mr1v1_match SET state='terminated', update_time=NOW() WHERE match_id=$1`, matchID)
 
+	action := "end_dispatched"
+	if force {
+		action = "destroy_dispatched"
+	}
+	b.writeLog(matchID, "platform", action, fmt.Sprintf(`{"force":%v,"agent":"%s"}`, force, agentUUID))
+
 	slog.Info("dispatched destroy command", "match_id", matchID, "force", force, "agent", agentUUID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
+type opLogRow struct {
+	ID        int64     `json:"id"`
+	MatchID   string    `json:"match_id"`
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+	Detail    string    `json:"detail"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (b *Backend) handleMatchLogs(w http.ResponseWriter, r *http.Request) {
+	matchID := r.PathValue("id")
+	rows, err := b.pool.Query(r.Context(), `
+		SELECT id, match_id, actor, action, detail, created_at
+		FROM mr1v1_operation_log
+		WHERE match_id = $1
+		ORDER BY created_at ASC
+	`, matchID)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+	var result []opLogRow
+	for rows.Next() {
+		var row opLogRow
+		if err := rows.Scan(&row.ID, &row.MatchID, &row.Actor, &row.Action, &row.Detail, &row.CreatedAt); err != nil {
+			continue
+		}
+		result = append(result, row)
+	}
+	if result == nil {
+		result = []opLogRow{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+// writeLog 写一条操作日志，非阻塞（错误只打日志不返回）。
+func (b *Backend) writeLog(matchID, actor, action, detail string) {
+	if _, err := b.pool.Exec(context.Background(),
+		`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
+		 VALUES ($1, $2, $3, $4)`,
+		matchID, actor, action, detail,
+	); err != nil {
+		slog.Error("write operation log failed", "error", err, "action", action)
+	}
 }
 
 // activeRehldsImage 从PG查询当前生效的rehlds镜像。
