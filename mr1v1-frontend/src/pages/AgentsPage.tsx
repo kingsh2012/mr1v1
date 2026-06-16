@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import {
-  Table, Tag, Button, Modal, Form, Select, InputNumber, Radio, Space, message, Typography, Alert,
+  Table, Tag, Button, Modal, Form, Select, InputNumber, Radio, Space, message,
+  Typography, Alert, Spin, Descriptions,
 } from 'antd'
 import { EditOutlined } from '@ant-design/icons'
 import axios from 'axios'
@@ -30,6 +31,147 @@ interface Agent {
   create_time: string
   update_time: string
   heartbeat_time: string
+}
+
+interface ContainerDetail {
+  id: string
+  image: string
+  command: string
+  created: number
+  status: string
+  names: string[] | null
+  env: string[] | null
+  labels: Record<string, string> | null
+}
+
+function ContainerExpand({ agentUUID }: { agentUUID: string }) {
+  const [loading, setLoading] = useState(false)
+  const [containers, setContainers] = useState<ContainerDetail[] | null>(null)
+  const [expandedEnv, setExpandedEnv] = useState<Record<string, boolean>>({})
+  const fetched = useRef(false)
+
+  useEffect(() => {
+    if (fetched.current) return
+    fetched.current = true
+    setLoading(true)
+    axios.get<ContainerDetail[]>(`/api/agents/${agentUUID}/containers`)
+      .then(r => setContainers(r.data ?? []))
+      .catch(() => setContainers([]))
+      .finally(() => setLoading(false))
+  }, [agentUUID])
+
+  if (loading) return <Spin style={{ margin: 16 }} />
+  if (!containers) return null
+
+  const envColumns = [
+    { title: '变量名', dataIndex: 'key', key: 'key', width: 220 },
+    { title: '值', dataIndex: 'val', key: 'val', ellipsis: true },
+  ]
+
+  const cols = [
+    { title: 'CONTAINER ID', dataIndex: 'id', key: 'id', width: 120 },
+    {
+      title: 'IMAGE',
+      dataIndex: 'image',
+      key: 'image',
+      ellipsis: true,
+      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
+    },
+    {
+      title: 'COMMAND',
+      dataIndex: 'command',
+      key: 'command',
+      width: 180,
+      ellipsis: true,
+      render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text>,
+    },
+    {
+      title: 'CREATED',
+      dataIndex: 'created',
+      key: 'created',
+      width: 160,
+      render: (v: number) => dayjs.unix(v).format('YYYY-MM-DD HH:mm:ss'),
+    },
+    {
+      title: 'STATUS',
+      dataIndex: 'status',
+      key: 'status',
+      width: 160,
+      render: (v: string) => {
+        const up = v.toLowerCase().startsWith('up')
+        return <Tag color={up ? 'green' : 'default'}>{v}</Tag>
+      },
+    },
+    {
+      title: 'NAMES',
+      dataIndex: 'names',
+      key: 'names',
+      render: (v: string[] | null) => (v ?? []).map(n => (
+        <Tag key={n} style={{ marginBottom: 2 }}>{n.replace(/^\//, '')}</Tag>
+      )),
+    },
+    {
+      title: 'ENV',
+      key: 'env',
+      width: 80,
+      render: (_: unknown, r: ContainerDetail) => {
+        const count = (r.env ?? []).length
+        if (count === 0) return <Text type="secondary">—</Text>
+        const open = expandedEnv[r.id]
+        return (
+          <Button size="small" type="link" style={{ padding: 0 }}
+            onClick={() => setExpandedEnv(prev => ({ ...prev, [r.id]: !open }))}>
+            {open ? '收起' : `查看(${count})`}
+          </Button>
+        )
+      },
+    },
+  ]
+
+  return (
+    <div style={{ padding: '8px 0' }}>
+      <Table<ContainerDetail>
+        rowKey="id"
+        dataSource={containers}
+        columns={cols}
+        size="small"
+        pagination={false}
+        scroll={{ x: 'max-content' }}
+        locale={{ emptyText: '该主机暂无容器' }}
+        expandable={{
+          expandedRowKeys: Object.entries(expandedEnv)
+            .filter(([, v]) => v).map(([k]) => k),
+          expandedRowRender: (r: ContainerDetail) => {
+            const envRows = (r.env ?? []).map(line => {
+              const idx = line.indexOf('=')
+              return idx < 0
+                ? { key: line, val: '' }
+                : { key: line.slice(0, idx), val: line.slice(idx + 1) }
+            })
+            return (
+              <Table
+                rowKey="key"
+                dataSource={envRows}
+                columns={envColumns}
+                size="small"
+                pagination={false}
+                style={{ margin: '4px 0' }}
+              />
+            )
+          },
+          showExpandColumn: false,
+        }}
+      />
+      {containers.length > 0 && (
+        <Descriptions size="small" style={{ marginTop: 8 }}>
+          <Descriptions.Item label="容器总数">{containers.length}</Descriptions.Item>
+          <Descriptions.Item label="运行中">
+            {containers.filter(c => c.status.toLowerCase().startsWith('up')).length}
+          </Descriptions.Item>
+        </Descriptions>
+      )}
+    </div>
+  )
 }
 
 function isOnline(hbt: string): boolean {
@@ -77,6 +219,7 @@ export default function AgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
   const [loading, setLoading] = useState(false)
   const [editTarget, setEditTarget] = useState<Agent | null>(null)
+  const [expandedKeys, setExpandedKeys] = useState<string[]>([])
   const [portMode, setPortMode] = useState<PortMode>('range')
   const [portStart, setPortStart] = useState<number | undefined>()
   const [portEnd, setPortEnd] = useState<number | undefined>()
@@ -233,6 +376,15 @@ export default function AgentsPage() {
         columns={columns}
         scroll={{ x: 'max-content' }}
         pagination={false}
+        expandable={{
+          expandedRowKeys: expandedKeys,
+          onExpand: (expanded, record) => {
+            setExpandedKeys(expanded
+              ? [...expandedKeys, record.uuid]
+              : expandedKeys.filter(k => k !== record.uuid))
+          },
+          expandedRowRender: (record: Agent) => <ContainerExpand agentUUID={record.uuid} />,
+        }}
       />
       <Modal
         title={`编辑 Agent: ${editTarget?.hostname || ''}`}

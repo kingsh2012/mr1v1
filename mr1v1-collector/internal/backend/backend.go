@@ -91,6 +91,7 @@ func (b *Backend) Handler() http.Handler {
 	// Agent 管理
 	mux.HandleFunc("GET /api/agents", b.handleListAgents)
 	mux.HandleFunc("PATCH /api/agents/{uuid}", b.handleUpdateAgent)
+	mux.HandleFunc("GET /api/agents/{uuid}/containers", b.handleAgentContainers)
 	// Rehlds 镜像配置
 	mux.HandleFunc("GET /api/rehlds-configs", b.handleListRehldsConfigs)
 	mux.HandleFunc("POST /api/rehlds-configs", b.handleCreateRehldsConfig)
@@ -514,6 +515,24 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
+}
+
+// handleAgentContainers 返回指定 agent 最近一次心跳上报的全量容器列表（含 ENV）。
+func (b *Backend) handleAgentContainers(w http.ResponseWriter, r *http.Request) {
+	uuid := r.PathValue("uuid")
+	var raw []byte
+	err := b.pool.QueryRow(r.Context(),
+		`SELECT containers_json FROM mr1v1_agent WHERE uuid=$1`, uuid,
+	).Scan(&raw)
+	if err != nil {
+		http.Error(w, "agent not found", http.StatusNotFound)
+		return
+	}
+	if len(raw) == 0 {
+		raw = []byte("[]")
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Write(raw)
 }
 
 // handleUpdateAgent 更新 agent 的可配置字段（status/rehlds_run_max/rehlds_port_range）。

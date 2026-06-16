@@ -20,6 +20,7 @@ var Statements = []string{
 		heartbeat_time     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
 	`ALTER TABLE mr1v1_agent ADD COLUMN IF NOT EXISTS running_containers TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE mr1v1_agent ADD COLUMN IF NOT EXISTS containers_json JSONB NOT NULL DEFAULT '[]'`,
 	`CREATE TABLE IF NOT EXISTS mr1v1_rehlds_config (
 		id          BIGSERIAL    PRIMARY KEY,
 		image       VARCHAR(256) NOT NULL,

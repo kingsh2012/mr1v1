@@ -18,19 +18,34 @@ const (
 	StateError   = "error"
 )
 
+// ContainerDetail mirrors dockerctl.ContainerDetail for the MQTT payload.
+// Duplicated here to keep agentproto import-free of internal packages.
+type ContainerDetail struct {
+	ID      string            `json:"id"`
+	Image   string            `json:"image"`
+	Command string            `json:"command"`
+	Created int64             `json:"created"`
+	Status  string            `json:"status"`
+	Names   []string          `json:"names"`
+	Env     []string          `json:"env"`
+	Labels  map[string]string `json:"labels"`
+}
+
 // Heartbeat 由 agent 定期上报，consumer 将其 upsert 到 mr1v1_agent 表。
 // CPU 字段为 CPU 逻辑核心数（字符串形式，如 "4"），consumer 用它初始化 rehlds_run_max 默认值。
 // RunningMatches 为当前正在运行的 rehlds 容器的 match_id 列表。
+// Containers 为主机上全量容器的详细信息（含 ENV），consumer 存为 containers_json。
 type Heartbeat struct {
-	UUID            string   `json:"uuid"`
-	Hostname        string   `json:"hostname"`
-	PublicIP        string   `json:"public_ip"`
-	LocalIP         string   `json:"local_ip"`
-	CPU             string   `json:"cpu"`
-	MemMB           int64    `json:"mem_mb"`
-	DiskGB          int64    `json:"disk_gb"`
-	RunningMatches  []string `json:"running_matches"`
-	Timestamp       int64    `json:"ts"`
+	UUID            string            `json:"uuid"`
+	Hostname        string            `json:"hostname"`
+	PublicIP        string            `json:"public_ip"`
+	LocalIP         string            `json:"local_ip"`
+	CPU             string            `json:"cpu"`
+	MemMB           int64             `json:"mem_mb"`
+	DiskGB          int64             `json:"disk_gb"`
+	RunningMatches  []string          `json:"running_matches"`
+	Containers      []ContainerDetail `json:"containers"`
+	Timestamp       int64             `json:"ts"`
 }
 
 // CreateCommand 由 backend 下发给指定 agent，指示其拉起一个 rehlds 容器。

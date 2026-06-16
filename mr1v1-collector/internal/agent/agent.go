@@ -373,6 +373,22 @@ func (a *Agent) heartbeatLoop() {
 		if runningMatches == nil {
 			runningMatches = []string{}
 		}
+
+		allContainers, _ := a.docker.ListAllWithEnv(context.Background())
+		protoContainers := make([]agentproto.ContainerDetail, 0, len(allContainers))
+		for _, c := range allContainers {
+			protoContainers = append(protoContainers, agentproto.ContainerDetail{
+				ID:      c.ID,
+				Image:   c.Image,
+				Command: c.Command,
+				Created: c.Created,
+				Status:  c.Status,
+				Names:   c.Names,
+				Env:     c.Env,
+				Labels:  c.Labels,
+			})
+		}
+
 		hb := agentproto.Heartbeat{
 			UUID:           a.hostID,
 			Hostname:       info.hostname,
@@ -382,6 +398,7 @@ func (a *Agent) heartbeatLoop() {
 			MemMB:          info.memMB,
 			DiskGB:         info.diskGB,
 			RunningMatches: runningMatches,
+			Containers:     protoContainers,
 			Timestamp:      time.Now().Unix(),
 		}
 		payload, err := json.Marshal(hb)

@@ -266,15 +266,20 @@ func (c *Consumer) onHeartbeat(_ mqtt.Client, msg mqtt.Message) {
 func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 	cpuCount, _ := strconv.Atoi(hb.CPU)
 	runningContainers := strings.Join(hb.RunningMatches, ",")
+	containersJSON, _ := json.Marshal(hb.Containers)
+	if len(containersJSON) == 0 {
+		containersJSON = []byte("[]")
+	}
 	_, err := c.pool.Exec(context.Background(), `
 		INSERT INTO mr1v1_agent
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
-			 status, rehlds_run_max, rehlds_port_range, running_containers,
+			 status, rehlds_run_max, rehlds_port_range, running_containers, containers_json,
 			 create_time, update_time, heartbeat_time)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', $9, NOW(), NOW(), NOW())
+		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', $9, $10, NOW(), NOW(), NOW())
 		ON CONFLICT (uuid) DO UPDATE SET
 			heartbeat_time     = NOW(),
 			running_containers = EXCLUDED.running_containers,
+			containers_json    = EXCLUDED.containers_json,
 			update_time = CASE
 				WHEN mr1v1_agent.hostname  != EXCLUDED.hostname
 				  OR mr1v1_agent.public_ip != EXCLUDED.public_ip
@@ -295,6 +300,6 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 				WHEN mr1v1_agent.rehlds_run_max = 0 THEN $8
 				ELSE mr1v1_agent.rehlds_run_max
 			END
-	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount, runningContainers)
+	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount, runningContainers, containersJSON)
 	return err
 }

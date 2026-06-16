@@ -124,6 +124,45 @@ func (c *Client) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// ContainerDetail holds display-ready information about a single Docker container,
+// including environment variables from ContainerInspect.
+type ContainerDetail struct {
+	ID      string            `json:"id"`      // 12-char short ID
+	Image   string            `json:"image"`
+	Command string            `json:"command"`
+	Created int64             `json:"created"` // Unix timestamp
+	Status  string            `json:"status"`
+	Names   []string          `json:"names"`
+	Env     []string          `json:"env"`     // KEY=VALUE pairs
+	Labels  map[string]string `json:"labels"`
+}
+
+// ListAllWithEnv returns details for every container on the host (running and stopped),
+// including environment variables obtained via ContainerInspect.
+func (c *Client) ListAllWithEnv(ctx context.Context) ([]ContainerDetail, error) {
+	list, err := c.cli.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		return nil, fmt.Errorf("list all containers: %w", err)
+	}
+	details := make([]ContainerDetail, 0, len(list))
+	for _, ct := range list {
+		d := ContainerDetail{
+			ID:      ct.ID[:12],
+			Image:   ct.Image,
+			Command: ct.Command,
+			Created: ct.Created,
+			Status:  ct.Status,
+			Names:   ct.Names,
+			Labels:  ct.Labels,
+		}
+		if info, _, err := c.cli.ContainerInspectWithRaw(ctx, ct.ID, false); err == nil {
+			d.Env = info.Config.Env
+		}
+		details = append(details, d)
+	}
+	return details, nil
+}
+
 // ListMatchIDs returns the match_ids of all currently running mr1v1 match containers.
 func (c *Client) ListMatchIDs(ctx context.Context) ([]string, error) {
 	f := filters.NewArgs(filters.Arg("label", LabelMatchID))
