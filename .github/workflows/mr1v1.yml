@@ -6,6 +6,7 @@ on:
       - 'mr1v1-consumer-v*'
       - 'mr1v1-backend-v*'
       - 'mr1v1-agent-v*'
+      - 'mr1v1-wx-v*'
     branches: ["main"]
 
 env:
@@ -13,6 +14,7 @@ env:
   CONSUMER_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer
   BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend
   AGENT_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent
+  WX_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-wx
 
 jobs:
   warm-cache:
@@ -218,3 +220,58 @@ jobs:
           file: mr1v1-collector/dockerfile/Dockerfile-agent
           push: true
           tags: ${{ env.AGENT_IMAGE }}:${{ steps.meta.outputs.version }}
+
+  build-wx:
+    if: startsWith(github.ref, 'refs/tags/mr1v1-wx-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Resolve version
+        id: meta
+        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-wx-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: mr1v1-collector/go.mod
+          cache: false
+
+      - name: Restore Go cache
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: mr1v1-go-${{ runner.os }}-${{ hashFiles('mr1v1-collector/go.sum') }}
+          restore-keys: mr1v1-go-${{ runner.os }}-
+
+      - name: Install tools
+        run: sudo apt-get install -y upx
+
+      - name: Build binary
+        working-directory: mr1v1-collector
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -trimpath -ldflags="-s -w" \
+            -o mr1v1-wx ./cmd/mr1v1-wx
+          upx --best mr1v1-wx
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: mr1v1-collector
+          file: mr1v1-collector/dockerfile/Dockerfile-wx
+          push: true
+          tags: ${{ env.WX_IMAGE }}:${{ steps.meta.outputs.version }}

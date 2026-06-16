@@ -17,6 +17,17 @@ services:
       - DB_SSL_MODE=disable
       - DB_TIMEZONE=Asia/Shanghai
 
+  mr1v1-wx:
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-wx:0.1.0
+    container_name: mr1v1-wx
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      - WX_APP_ID=wx04b9f2b8ddbd9fcf
+      - WX_APP_SECRET=${WX_APP_SECRET}
+      - BACKEND_URL=http://127.0.0.1:8181
+      - WX_PORT=8082
+
   mr1v1-backend:
     image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.1.11
     container_name: mr1v1-backend
