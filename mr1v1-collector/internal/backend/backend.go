@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	mathrand "math/rand/v2"
 	"net/http"
 	"strconv"
 	"strings"
@@ -293,11 +294,17 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 		}
 		busyRows.Close()
 
-		for p := start; p <= end && p < start+c.runMax; p++ {
+		var available []int
+		for p := start; p <= end; p++ {
 			if !busy[p] {
-				return c.uuid, p, nil
+				available = append(available, p)
 			}
 		}
+		if len(available) == 0 || len(busy) >= c.runMax {
+			continue
+		}
+		mathrand.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
+		return c.uuid, available[0], nil
 	}
 	return "", 0, fmt.Errorf("all agents are at capacity")
 }

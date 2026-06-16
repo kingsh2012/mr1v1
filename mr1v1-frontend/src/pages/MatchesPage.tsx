@@ -160,6 +160,8 @@ export default function MatchesPage() {
     try {
       const res = await axios.get<OpLog[]>(`/api/matches/${matchID}/logs`)
       setLogsCache(prev => ({ ...prev, [matchID]: res.data ?? [] }))
+    } catch {
+      setLogsCache(prev => ({ ...prev, [matchID]: [] }))
     } finally {
       setLogsLoading(prev => { const s = new Set(prev); s.delete(matchID); return s })
     }

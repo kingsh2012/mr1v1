@@ -37,9 +37,11 @@ func New(cfg *config.ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
 
-	if _, err := pool.Exec(context.Background(), model.DDL); err != nil {
-		pool.Close()
-		return nil, fmt.Errorf("migrate tables: %w", err)
+	for _, stmt := range model.Statements {
+		if _, err := pool.Exec(context.Background(), stmt); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("migrate tables: %w\nSQL: %s", err, stmt[:min(len(stmt), 80)])
+		}
 	}
 
 	c := &Consumer{cfg: cfg, pool: pool}
@@ -120,10 +122,18 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 		); err != nil {
 			return err
 		}
-		_, err := c.pool.Exec(ctx,
+		if _, err := c.pool.Exec(ctx,
 			`UPDATE mr1v1_match SET state='playing', update_time=NOW()
 			 WHERE match_id=$1 AND state IN ('creating','waiting')`,
 			d.MatchID,
+		); err != nil {
+			return err
+		}
+		_, err := c.pool.Exec(ctx,
+			`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
+			 VALUES ($1,'game','match_started',$2)`,
+			d.MatchID,
+			fmt.Sprintf(`{"map":"%s","p0":"%s","p1":"%s"}`, d.Map, d.P0AuthID, d.P1AuthID),
 		)
 		return err
 
@@ -160,10 +170,19 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 		); err != nil {
 			return err
 		}
-		_, err := c.pool.Exec(ctx,
+		if _, err := c.pool.Exec(ctx,
 			`UPDATE mr1v1_match SET state='finished', update_time=NOW()
 			 WHERE match_id=$1 AND state != 'finished'`,
 			d.MatchID,
+		); err != nil {
+			return err
+		}
+		_, err := c.pool.Exec(ctx,
+			`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
+			 VALUES ($1,'game','match_ended',$2)`,
+			d.MatchID,
+			fmt.Sprintf(`{"winner_slot":%d,"wins0":%d,"wins1":%d,"end_reason":"%s"}`,
+				d.WinnerSlot, d.Wins0, d.Wins1, d.EndReason),
 		)
 		return err
 
