@@ -1,74 +1,158 @@
 ---
 name: release
-description: 发版流程——commit & push未提交改动，打git tag，本地docker build并push镜像到阿里云ACR，更新docker-compose.prod.yml镜像tag并提交。当用户说"发版"/"commit & push & 发版"/"release"时使用。
+description: 发版流程——明确哪些镜像本地打包、哪些走GitHub CI；打tag/构建/推镜像/部署到对应服务器/自测。当用户说"发版"/"release"/"部署"时使用。
 ---
 
 # 发版流程 (release)
 
-本仓库（CS 1.6 1v1平台 `/data/rehlds`）没有CI/CD，发版=本地手动完成以下步骤。
-**每一步都涉及推送到远程（git push / docker push），属于影响共享状态的操作**，
-执行前按下方"确认点"与用户确认，不要自行跳过。
+## 打包方式分工
 
-## 步骤
+| 镜像 | 打包方式 | 原因 |
+|---|---|---|
+| `mr1v1-rehlds` (ReHLDS游戏服务器) | **本地 docker build + push** | 含大型游戏二进制/地图，CI runner带宽慢；本地已有缓存层 |
+| `mr1v1-consumer` | **GitHub Actions** (`mr1v1-consumer-v*` tag触发) | Go跨平台编译，CI更干净；无大文件 |
+| `mr1v1-backend` | **GitHub Actions** (`mr1v1-backend-v*` tag触发) | 同上 |
+| `mr1v1-agent` | **GitHub Actions** (`mr1v1-agent-v*` tag触发) | 同上 |
 
-1. **确定新版本号**
-   - 当前生产版本号以 `server/docker-compose.prod.yml` 中 `image:` 的tag为准（如 `v0.2.3`）
-   - 默认规则：patch号 +1（`v0.2.3` → `v0.2.4`）。如果改动明显是功能性的，可以和用户确认是否要+1 minor号
-   - 检查 `git tag -l` 确保新tag不重复
+镜像仓库统一：`registry.cn-beijing.aliyuncs.com/kingsh2012/`
+（生产机拉取用 `registry-vpc.cn-beijing.aliyuncs.com`，同一仓库不同endpoint）
 
-2. **commit & push 代码改动**
+---
+
+## 部署目标
+
+| 机器 | 用途 | 服务 |
+|---|---|---|
+| 192.144.237.182 | 中心栈 | mr1v1-consumer、mr1v1-backend |
+| 60.205.152.236 | rehlds主机 + agent | mr1v1-agent、mr1v1-rehlds容器（按局拉起） |
+
+---
+
+## 一、rehlds 游戏服务器镜像（本地打包）
+
+### 版本号
+- 当前tag以 `server/docker-compose.prod.yml` 里的 `image:` tag 为准
+- 默认 patch +1，功能性改动可 +1 minor
+
+### 步骤
+
+1. **检查磁盘空间**
    ```bash
-   git status
-   git add <相关文件>
-   git commit -m "..."
-   git push
-   ```
-   按仓库惯例：commit message 用中文，第一行 `<type>: <概述>`（type如feat/docs/chore/fix），
-   正文说明改了什么、为什么。
-
-3. **创建并推送 git tag**
-   ```bash
-   git tag -a vX.Y.Z -m "vX.Y.Z: <本次发版核心内容一句话总结>"
-   git push origin vX.Y.Z
+   df -h /data/rehlds
    ```
 
-4. **本地 docker build**（确认点：构建上下文是`server/`目录，COPY了整个目录含地图资源，
-   构建产物较大——build前可用`df -h .`检查磁盘剩余空间，确保>2GB）
+2. **本地 docker build**
    ```bash
    cd /data/rehlds/server
-   docker build -t registry.cn-beijing.aliyuncs.com/kingsh2012/rm1v1:vX.Y.Z .
+   docker build -t registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:vX.Y.Z .
    ```
-   注意：`apt-get install` 那一层通常会被docker层缓存命中（不变则秒过），
-   主要耗时在 `COPY . .` 和 export镜像层。
 
-5. **docker push 到镜像仓库**（确认点：这是生产镜像仓库，push后线上重新拉取该tag即生效；
-   先确认 `~/.docker/config.json` 里已有 `registry.cn-beijing.aliyuncs.com` 的登录凭证）
+3. **docker push**
    ```bash
-   docker push registry.cn-beijing.aliyuncs.com/kingsh2012/rm1v1:vX.Y.Z
+   docker push registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:vX.Y.Z
    ```
 
-6. **更新 `server/docker-compose.prod.yml` 镜像tag**
-   - 注意：本地build/push用的endpoint是 `registry.cn-beijing.aliyuncs.com`（公网），
-     但 `docker-compose.prod.yml` 里用的是 `registry-vpc.cn-beijing.aliyuncs.com`（VPC内网，生产服务器拉取用）。
-     **两者指向同一个ACR仓库/命名空间**，只改tag号，不要改endpoint前缀。
+4. **更新 docker-compose.prod.yml 并提交**
+   - 修改 `server/docker-compose.prod.yml` 里的 `image:` tag
+   - `git add server/docker-compose.prod.yml && git commit -m "chore: 生产rehlds镜像tag更新到vX.Y.Z" && git push`
+   - 同步更新 `docker/docker-compose-mr1v1-agent.yml` 中 `DOCKER_IMAGE` 环境变量的 tag
+
+---
+
+## 二、Go 服务（GitHub CI 打包）
+
+### 步骤
+
+1. **确认代码已 push**
    ```bash
-   # 把 image: registry-vpc.cn-beijing.aliyuncs.com/kingsh2012/rm1v1:v旧版本
-   # 改成 image: registry-vpc.cn-beijing.aliyuncs.com/kingsh2012/rm1v1:vX.Y.Z
+   git status && git push
    ```
 
-7. **commit & push 这个compose文件改动**
+2. **打 tag 触发构建**（只打需要更新的服务）
    ```bash
-   git add server/docker-compose.prod.yml
-   git commit -m "chore: 生产镜像tag更新到vX.Y.Z
-
-   对应已构建并推送的 registry.cn-beijing.aliyuncs.com/kingsh2012/rm1v1:vX.Y.Z（说明本次镜像内容）"
-   git push
+   git tag mr1v1-consumer-v0.1.0 -m "mr1v1-consumer v0.1.0" && git push origin mr1v1-consumer-v0.1.0
+   git tag mr1v1-backend-v0.1.0  -m "mr1v1-backend v0.1.0"  && git push origin mr1v1-backend-v0.1.0
+   git tag mr1v1-agent-v0.1.0   -m "mr1v1-agent v0.1.0"    && git push origin mr1v1-agent-v0.1.0
    ```
+
+3. **跟踪构建进度**
+   ```bash
+   gh run list --repo kingsh2012/procs-1v1 --limit 5
+   gh run watch --repo kingsh2012/procs-1v1
+   ```
+
+4. **CI 成功后镜像自动推入阿里云仓库**
+
+---
+
+## 三、部署
+
+### 首次部署（传 compose 文件）
+```bash
+ssh root@192.144.237.182 "mkdir -p /opt/mr1v1"
+scp /data/rehlds/docker/docker-compose-mr1v1-central.yml root@192.144.237.182:/opt/mr1v1/
+
+ssh root@60.205.152.236 "mkdir -p /opt/mr1v1-agent"
+scp /data/rehlds/docker/docker-compose-mr1v1-agent.yml root@60.205.152.236:/opt/mr1v1-agent/
+```
+
+### 中心栈（192.144.237.182）
+```bash
+ssh root@192.144.237.182 "
+  cd /opt/mr1v1 &&
+  docker compose -f docker-compose-mr1v1-central.yml pull &&
+  docker compose -f docker-compose-mr1v1-central.yml up -d &&
+  docker compose -f docker-compose-mr1v1-central.yml ps
+"
+```
+
+### Agent 栈（60.205.152.236）
+```bash
+ssh root@60.205.152.236 "
+  cd /opt/mr1v1-agent &&
+  docker compose -f docker-compose-mr1v1-agent.yml pull &&
+  docker compose -f docker-compose-mr1v1-agent.yml up -d &&
+  docker compose -f docker-compose-mr1v1-agent.yml ps
+"
+```
+
+---
+
+## 四、自测验证
+
+### 1. 检查服务健康
+```bash
+curl -sf http://192.144.237.182:8080/healthz && echo OK
+curl -s http://192.144.237.182:8080/agents | python3 -m json.tool
+ssh root@192.144.237.182 "docker logs mr1v1-consumer --tail 30"
+ssh root@192.144.237.182 "docker logs mr1v1-backend --tail 30"
+ssh root@60.205.152.236 "docker logs mr1v1-agent --tail 30"
+```
+
+### 2. 撮合测试
+```bash
+curl -s -X POST http://192.144.237.182:8080/matches \
+  -H "Content-Type: application/json" \
+  -d '{"p0_steamid":"STEAM_0:0:12345","p1_steamid":"STEAM_0:0:67890"}' \
+  | python3 -m json.tool
+```
+返回 `match_id / host_id / port` 表示撮合成功。
+
+### 3. 验证 rehlds 容器（由 agent 拉起）
+```bash
+ssh root@60.205.152.236 "docker ps | grep mr1v1-match"
+ssh root@60.205.152.236 "docker logs mr1v1-match-<match_id> --tail 50"
+```
+
+### 4. 文档错误修复
+如果 skill 文档或设计文档有误，直接 Edit 修改对应文件（`.claude/skills/release/SKILL.md`、
+`AGENT_ARCHITECTURE_DESIGN.md` 等），修完后 `git add && git commit && git push`。
+
+---
 
 ## 注意事项
 
-- 如果用户只说"commit & push"而没说"发版"，**不要**自动执行3-7步（tag/docker build/push）——
-  只做第2步。"发版"才触发完整流程。
-- 第4-5步（docker build/push）耐心等待，build可能需要1-2分钟，push取决于网络。
-- 如果磁盘空间紧张（`df -h .` 剩余<2GB），先用 `docker system df` 看是否有可回收的旧镜像/build cache，
-  和用户确认后再清理（不要自行删除其他不相关的镜像）。
+- GitHub CI Secrets 需提前配置：`REGISTRY_USERNAME`、`REGISTRY_PASSWORD`
+- 首次 docker push 前确认已登录：`docker login registry.cn-beijing.aliyuncs.com`
+- 192.144.237.182 的 PG 库已建好（mr1v1/Mr1v1Db2026!），consumer 首次启动会 AutoMigrate
+- agent compose 里 `DOCKER_IMAGE` 需与 rehlds 最新 tag 保持同步

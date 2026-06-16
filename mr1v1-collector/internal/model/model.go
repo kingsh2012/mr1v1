@@ -1,112 +1,89 @@
-// Package model 定义consumer写入PostgreSQL的6张表结构（GORM AutoMigrate）。
+// Package model 定义consumer写入PostgreSQL的6张表结构及建表DDL。
 package model
 
-import "time"
+// DDL 包含所有建表语句（IF NOT EXISTS），consumer启动时执行。
+const DDL = `
+CREATE TABLE IF NOT EXISTS mr1v1_match_start (
+	id         BIGSERIAL PRIMARY KEY,
+	match_id   VARCHAR(64) NOT NULL UNIQUE,
+	map        VARCHAR(64) NOT NULL DEFAULT '',
+	p0_name    VARCHAR(64) NOT NULL DEFAULT '',
+	p0_authid  VARCHAR(64) NOT NULL DEFAULT '',
+	p0_userid  INT         NOT NULL DEFAULT 0,
+	p1_name    VARCHAR(64) NOT NULL DEFAULT '',
+	p1_authid  VARCHAR(64) NOT NULL DEFAULT '',
+	p1_userid  INT         NOT NULL DEFAULT 0,
+	ts         BIGINT      NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-// AllTables 用于AutoMigrate，列出所有需要建表的model。
-var AllTables = []any{
-	&MatchStart{},
-	&RoundEnd{},
-	&MatchEnd{},
-	&CombatEvent{},
-	&ShootEvent{},
-	&PositionEvent{},
-}
+CREATE TABLE IF NOT EXISTS mr1v1_round_end (
+	id          BIGSERIAL PRIMARY KEY,
+	match_id    VARCHAR(64) NOT NULL,
+	round       INT         NOT NULL DEFAULT 0,
+	phase       INT         NOT NULL DEFAULT 0,
+	winner_slot INT         NOT NULL DEFAULT 0,
+	wins0       INT         NOT NULL DEFAULT 0,
+	wins1       INT         NOT NULL DEFAULT 0,
+	p0_damage   INT         NOT NULL DEFAULT 0,
+	p0_hits     INT         NOT NULL DEFAULT 0,
+	p1_damage   INT         NOT NULL DEFAULT 0,
+	p1_hits     INT         NOT NULL DEFAULT 0,
+	ts          BIGINT      NOT NULL DEFAULT 0,
+	created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_round_end_match_id ON mr1v1_round_end(match_id);
 
-// MatchStart 对应 mr1v1_match_start 事件，每场比赛一行。
-type MatchStart struct {
-	ID        uint   `gorm:"primaryKey"`
-	MatchID   string `gorm:"column:match_id;uniqueIndex;size:64"`
-	Map       string `gorm:"column:map;size:64"`
-	P0Name    string `gorm:"column:p0_name;size:64"`
-	P0AuthID  string `gorm:"column:p0_authid;size:64"`
-	P0UserID  int    `gorm:"column:p0_userid"`
-	P1Name    string `gorm:"column:p1_name;size:64"`
-	P1AuthID  string `gorm:"column:p1_authid;size:64"`
-	P1UserID  int    `gorm:"column:p1_userid"`
-	Ts        int64  `gorm:"column:ts"`
-	CreatedAt time.Time
-}
+CREATE TABLE IF NOT EXISTS mr1v1_match_end (
+	id          BIGSERIAL PRIMARY KEY,
+	match_id    VARCHAR(64) NOT NULL UNIQUE,
+	end_reason  VARCHAR(32) NOT NULL DEFAULT '',
+	winner_slot INT         NOT NULL DEFAULT 0,
+	wins0       INT         NOT NULL DEFAULT 0,
+	wins1       INT         NOT NULL DEFAULT 0,
+	p0_name     VARCHAR(64) NOT NULL DEFAULT '',
+	p0_authid   VARCHAR(64) NOT NULL DEFAULT '',
+	p1_name     VARCHAR(64) NOT NULL DEFAULT '',
+	p1_authid   VARCHAR(64) NOT NULL DEFAULT '',
+	ts          BIGINT      NOT NULL DEFAULT 0,
+	created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
 
-func (MatchStart) TableName() string { return "mr1v1_match_start" }
+CREATE TABLE IF NOT EXISTS mr1v1_combat_event (
+	id            BIGSERIAL PRIMARY KEY,
+	match_id      VARCHAR(64) NOT NULL,
+	ts            BIGINT      NOT NULL DEFAULT 0,
+	attacker_slot INT         NOT NULL DEFAULT 0,
+	victim_slot   INT         NOT NULL DEFAULT 0,
+	weapon        VARCHAR(32) NOT NULL DEFAULT '',
+	damage        INT         NOT NULL DEFAULT 0,
+	hitgroup      INT         NOT NULL DEFAULT 0,
+	created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_combat_event_match_id ON mr1v1_combat_event(match_id);
 
-// RoundEnd 对应 mr1v1_round_end 事件，每回合一行。
-type RoundEnd struct {
-	ID         uint   `gorm:"primaryKey"`
-	MatchID    string `gorm:"column:match_id;index;size:64"`
-	Round      int    `gorm:"column:round"`
-	Phase      int    `gorm:"column:phase"`
-	WinnerSlot int    `gorm:"column:winner_slot"`
-	Wins0      int    `gorm:"column:wins0"`
-	Wins1      int    `gorm:"column:wins1"`
-	P0Damage   int    `gorm:"column:p0_damage"`
-	P0Hits     int    `gorm:"column:p0_hits"`
-	P1Damage   int    `gorm:"column:p1_damage"`
-	P1Hits     int    `gorm:"column:p1_hits"`
-	Ts         int64  `gorm:"column:ts"`
-	CreatedAt  time.Time
-}
+CREATE TABLE IF NOT EXISTS mr1v1_shoot_event (
+	id             BIGSERIAL PRIMARY KEY,
+	match_id       VARCHAR(64) NOT NULL,
+	ts             BIGINT      NOT NULL DEFAULT 0,
+	slot           INT         NOT NULL DEFAULT 0,
+	weapon         VARCHAR(32) NOT NULL DEFAULT '',
+	ammo_remaining INT         NOT NULL DEFAULT 0,
+	created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_shoot_event_match_id ON mr1v1_shoot_event(match_id);
 
-func (RoundEnd) TableName() string { return "mr1v1_round_end" }
-
-// MatchEnd 对应 mr1v1_match_end 事件，每场比赛一行。
-type MatchEnd struct {
-	ID         uint   `gorm:"primaryKey"`
-	MatchID    string `gorm:"column:match_id;uniqueIndex;size:64"`
-	EndReason  string `gorm:"column:end_reason;size:32"`
-	WinnerSlot int    `gorm:"column:winner_slot"`
-	Wins0      int    `gorm:"column:wins0"`
-	Wins1      int    `gorm:"column:wins1"`
-	P0Name     string `gorm:"column:p0_name;size:64"`
-	P0AuthID   string `gorm:"column:p0_authid;size:64"`
-	P1Name     string `gorm:"column:p1_name;size:64"`
-	P1AuthID   string `gorm:"column:p1_authid;size:64"`
-	Ts         int64  `gorm:"column:ts"`
-	CreatedAt  time.Time
-}
-
-func (MatchEnd) TableName() string { return "mr1v1_match_end" }
-
-// CombatEvent 对应 mr1v1_combat_batch 的 events[] 元素，每次命中一行。
-type CombatEvent struct {
-	ID           uint   `gorm:"primaryKey"`
-	MatchID      string `gorm:"column:match_id;index;size:64"`
-	Ts           int64  `gorm:"column:ts"`
-	AttackerSlot int    `gorm:"column:attacker_slot"`
-	VictimSlot   int    `gorm:"column:victim_slot"`
-	Weapon       string `gorm:"column:weapon;size:32"`
-	Damage       int    `gorm:"column:damage"`
-	Hitgroup     int    `gorm:"column:hitgroup"`
-	CreatedAt    time.Time
-}
-
-func (CombatEvent) TableName() string { return "mr1v1_combat_event" }
-
-// ShootEvent 对应 mr1v1_shoot_batch 的 events[] 元素，每次开枪一行。
-type ShootEvent struct {
-	ID            uint   `gorm:"primaryKey"`
-	MatchID       string `gorm:"column:match_id;index;size:64"`
-	Ts            int64  `gorm:"column:ts"`
-	Slot          int    `gorm:"column:slot"`
-	Weapon        string `gorm:"column:weapon;size:32"`
-	AmmoRemaining int    `gorm:"column:ammo_remaining"`
-	CreatedAt     time.Time
-}
-
-func (ShootEvent) TableName() string { return "mr1v1_shoot_event" }
-
-// PositionEvent 对应 mr1v1_position_batch 的 events[] 元素，每次采样一行。
-type PositionEvent struct {
-	ID        uint    `gorm:"primaryKey"`
-	MatchID   string  `gorm:"column:match_id;index;size:64"`
-	Ts        int64   `gorm:"column:ts"`
-	Slot      int     `gorm:"column:slot"`
-	X         float64 `gorm:"column:x"`
-	Y         float64 `gorm:"column:y"`
-	Z         float64 `gorm:"column:z"`
-	Yaw       float64 `gorm:"column:yaw"`
-	Pitch     float64 `gorm:"column:pitch"`
-	CreatedAt time.Time
-}
-
-func (PositionEvent) TableName() string { return "mr1v1_position_event" }
+CREATE TABLE IF NOT EXISTS mr1v1_position_event (
+	id         BIGSERIAL PRIMARY KEY,
+	match_id   VARCHAR(64) NOT NULL,
+	ts         BIGINT      NOT NULL DEFAULT 0,
+	slot       INT         NOT NULL DEFAULT 0,
+	x          DOUBLE PRECISION NOT NULL DEFAULT 0,
+	y          DOUBLE PRECISION NOT NULL DEFAULT 0,
+	z          DOUBLE PRECISION NOT NULL DEFAULT 0,
+	yaw        DOUBLE PRECISION NOT NULL DEFAULT 0,
+	pitch      DOUBLE PRECISION NOT NULL DEFAULT 0,
+	created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_position_event_match_id ON mr1v1_position_event(match_id);
+`

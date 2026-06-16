@@ -71,9 +71,11 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 	// invoked from HTTP request handlers, which cannot fire until New
 	// returns and a has been assigned, so the nil window is safe.
 	var a *Agent
+	gwMQTT := cfg.MQTT
+	gwMQTT.ClientID = "mr1v1-agent-" + hostID
 	gw, err := gateway.NewWithHook(&config.GatewayConfig{
-		HTTP: cfg.HTTP,
-		MQTT: cfg.MQTT,
+		HTTP:  cfg.HTTP,
+		MQTT:  gwMQTT,
 		Queue: struct{ Capacity int }{Capacity: cfg.Queue.Capacity},
 	}, func(env envelope.Envelope) {
 		a.onEnvelope(env)
@@ -85,7 +87,7 @@ func New(cfg *config.AgentConfig) (*Agent, error) {
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.Broker).
-		SetClientID(cfg.MQTT.ClientID + "-ctl").
+		SetClientID("mr1v1-agent-" + hostID + "-ctl").
 		SetAutoReconnect(true).
 		SetConnectTimeout(10 * time.Second).
 		SetKeepAlive(30 * time.Second)

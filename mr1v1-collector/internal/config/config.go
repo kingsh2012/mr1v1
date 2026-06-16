@@ -2,6 +2,9 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+	"fmt"
 	"os"
 	"strconv"
 )
@@ -90,6 +93,15 @@ type BackendConfig struct {
 	AgentStaleSeconds int
 }
 
+// autoClientID 在 MQTT_CLIENT_ID 未设置时自动生成唯一 client_id。
+// 格式：{prefix}-{hostname}-{4字节随机hex}，多实例/重启后不会冲突。
+func autoClientID(prefix string) string {
+	hostname, _ := os.Hostname()
+	b := make([]byte, 4)
+	rand.Read(b) //nolint:errcheck
+	return fmt.Sprintf("%s-%s-%s", prefix, hostname, hex.EncodeToString(b))
+}
+
 func envOr(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -126,7 +138,7 @@ func LoadConsumerFromEnv() *ConsumerConfig {
 	cfg := &ConsumerConfig{}
 	cfg.MQTT.Broker = envOr("MQTT_BROKER", "tcp://localhost:1883")
 	cfg.MQTT.Topic = envOr("MQTT_TOPIC", "mr1v1/#")
-	cfg.MQTT.ClientID = envOr("MQTT_CLIENT_ID", "mr1v1-consumer")
+	cfg.MQTT.ClientID = envOr("MQTT_CLIENT_ID", autoClientID("mr1v1-consumer"))
 	cfg.MQTT.User = envOr("MQTT_USER", "")
 	cfg.MQTT.Pass = envOr("MQTT_PASS", "")
 	cfg.DB.Host = envOr("DB_HOST", "localhost")
@@ -153,7 +165,7 @@ func LoadBackendFromEnv() *BackendConfig {
 	cfg := &BackendConfig{}
 	cfg.HTTP.Listen = envOr("HTTP_LISTEN", "0.0.0.0:8080")
 	cfg.MQTT.Broker = envOr("MQTT_BROKER", "tcp://localhost:1883")
-	cfg.MQTT.ClientID = envOr("MQTT_CLIENT_ID", "mr1v1-backend")
+	cfg.MQTT.ClientID = envOr("MQTT_CLIENT_ID", autoClientID("mr1v1-backend"))
 	cfg.MQTT.User = envOr("MQTT_USER", "")
 	cfg.MQTT.Pass = envOr("MQTT_PASS", "")
 	cfg.AgentStaleSeconds = envIntOr("AGENT_STALE_SECONDS", 30)
