@@ -82,8 +82,8 @@ const LOG_COLUMNS: ColumnsType<OpLog> = [
 const STATE_COLOR: Record<string, string> = {
   creating:   'processing',
   waiting:    'warning',
-  playing:    'success',
-  finished:   'default',
+  playing:    'blue',
+  finished:   'success',
   terminated: 'orange',
   error:      'error',
 }
