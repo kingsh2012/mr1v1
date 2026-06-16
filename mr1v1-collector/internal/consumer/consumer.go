@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -107,7 +108,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 		if err := json.Unmarshal(env.Data, &d); err != nil {
 			return err
 		}
-		_, err := c.pool.Exec(ctx,
+		if _, err := c.pool.Exec(ctx,
 			`INSERT INTO mr1v1_match_start
 				(match_id,map,p0_name,p0_authid,p0_userid,p1_name,p1_authid,p1_userid,ts)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
@@ -116,6 +117,13 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			d.P0Name, d.P0AuthID, d.P0UserID,
 			d.P1Name, d.P1AuthID, d.P1UserID,
 			env.Timestamp,
+		); err != nil {
+			return err
+		}
+		_, err := c.pool.Exec(ctx,
+			`UPDATE mr1v1_match SET state='playing', update_time=NOW()
+			 WHERE match_id=$1 AND state IN ('creating','waiting')`,
+			d.MatchID,
 		)
 		return err
 
@@ -140,7 +148,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 		if err := json.Unmarshal(env.Data, &d); err != nil {
 			return err
 		}
-		_, err := c.pool.Exec(ctx,
+		if _, err := c.pool.Exec(ctx,
 			`INSERT INTO mr1v1_match_end
 				(match_id,end_reason,winner_slot,wins0,wins1,p0_name,p0_authid,p1_name,p1_authid,ts)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
@@ -149,6 +157,13 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			d.Wins0, d.Wins1,
 			d.P0Name, d.P0AuthID, d.P1Name, d.P1AuthID,
 			env.Timestamp,
+		); err != nil {
+			return err
+		}
+		_, err := c.pool.Exec(ctx,
+			`UPDATE mr1v1_match SET state='finished', update_time=NOW()
+			 WHERE match_id=$1 AND state != 'finished'`,
+			d.MatchID,
 		)
 		return err
 
@@ -231,14 +246,16 @@ func (c *Consumer) onHeartbeat(_ mqtt.Client, msg mqtt.Message) {
 
 func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 	cpuCount, _ := strconv.Atoi(hb.CPU)
+	runningContainers := strings.Join(hb.RunningMatches, ",")
 	_, err := c.pool.Exec(context.Background(), `
 		INSERT INTO mr1v1_agent
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
-			 status, rehlds_run_max, rehlds_port_range,
+			 status, rehlds_run_max, rehlds_port_range, running_containers,
 			 create_time, update_time, heartbeat_time)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', NOW(), NOW(), NOW())
+		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', $9, NOW(), NOW(), NOW())
 		ON CONFLICT (uuid) DO UPDATE SET
-			heartbeat_time = NOW(),
+			heartbeat_time     = NOW(),
+			running_containers = EXCLUDED.running_containers,
 			update_time = CASE
 				WHEN mr1v1_agent.hostname  != EXCLUDED.hostname
 				  OR mr1v1_agent.public_ip != EXCLUDED.public_ip
@@ -259,6 +276,6 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 				WHEN mr1v1_agent.rehlds_run_max = 0 THEN $8
 				ELSE mr1v1_agent.rehlds_run_max
 			END
-	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount)
+	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount, runningContainers)
 	return err
 }

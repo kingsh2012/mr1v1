@@ -4,20 +4,23 @@ package model
 // DDL 包含所有建表语句（IF NOT EXISTS），consumer启动时执行。
 const DDL = `
 CREATE TABLE IF NOT EXISTS mr1v1_agent (
-	uuid              VARCHAR(64)  PRIMARY KEY,
-	hostname          VARCHAR(128) NOT NULL DEFAULT '',
-	public_ip         VARCHAR(64)  NOT NULL DEFAULT '',
-	local_ip          VARCHAR(64)  NOT NULL DEFAULT '',
-	cpu               VARCHAR(128) NOT NULL DEFAULT '',
-	mem_mb            BIGINT       NOT NULL DEFAULT 0,
-	disk_gb           BIGINT       NOT NULL DEFAULT 0,
-	status            VARCHAR(16)  NOT NULL DEFAULT 'enabled',
-	rehlds_run_max    INT          NOT NULL DEFAULT 0,
-	rehlds_port_range VARCHAR(32)  NOT NULL DEFAULT '',
-	create_time       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-	update_time       TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-	heartbeat_time    TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+	uuid               VARCHAR(64)  PRIMARY KEY,
+	hostname           VARCHAR(128) NOT NULL DEFAULT '',
+	public_ip          VARCHAR(64)  NOT NULL DEFAULT '',
+	local_ip           VARCHAR(64)  NOT NULL DEFAULT '',
+	cpu                VARCHAR(128) NOT NULL DEFAULT '',
+	mem_mb             BIGINT       NOT NULL DEFAULT 0,
+	disk_gb            BIGINT       NOT NULL DEFAULT 0,
+	status             VARCHAR(16)  NOT NULL DEFAULT 'enabled',
+	rehlds_run_max     INT          NOT NULL DEFAULT 0,
+	rehlds_port_range  VARCHAR(32)  NOT NULL DEFAULT '',
+	running_containers TEXT         NOT NULL DEFAULT '',
+	create_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+	update_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+	heartbeat_time     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
+-- 存量表加列（幂等）
+ALTER TABLE mr1v1_agent ADD COLUMN IF NOT EXISTS running_containers TEXT NOT NULL DEFAULT '';
 
 CREATE TABLE IF NOT EXISTS mr1v1_rehlds_config (
 	id          BIGSERIAL    PRIMARY KEY,
@@ -27,15 +30,23 @@ CREATE TABLE IF NOT EXISTS mr1v1_rehlds_config (
 	create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
 
-CREATE TABLE IF NOT EXISTS mr1v1_match_status (
-	match_id   VARCHAR(64)  PRIMARY KEY,
-	agent_uuid VARCHAR(64)  NOT NULL DEFAULT '',
-	port       INT          NOT NULL DEFAULT 0,
-	state      VARCHAR(16)  NOT NULL DEFAULT 'running',
-	create_time TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-	update_time TIMESTAMPTZ NOT NULL DEFAULT NOW()
+-- 旧表迁移
+DROP TABLE IF EXISTS mr1v1_match_status;
+
+CREATE TABLE IF NOT EXISTS mr1v1_match (
+	match_id    VARCHAR(64)  PRIMARY KEY,
+	p0_steamid  VARCHAR(64)  NOT NULL DEFAULT '',
+	p1_steamid  VARCHAR(64)  NOT NULL DEFAULT '',
+	server_name VARCHAR(128) NOT NULL DEFAULT '',
+	agent_uuid  VARCHAR(64)  NOT NULL DEFAULT '',
+	port        INT          NOT NULL DEFAULT 0,
+	image       VARCHAR(256) NOT NULL DEFAULT '',
+	state       VARCHAR(16)  NOT NULL DEFAULT 'creating',
+	create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+	update_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 );
-CREATE INDEX IF NOT EXISTS idx_match_status_agent ON mr1v1_match_status(agent_uuid, state);
+CREATE INDEX IF NOT EXISTS idx_match_agent ON mr1v1_match(agent_uuid, state);
+CREATE INDEX IF NOT EXISTS idx_match_state  ON mr1v1_match(state);
 
 CREATE TABLE IF NOT EXISTS mr1v1_match_start (
 	id         BIGSERIAL PRIMARY KEY,

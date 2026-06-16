@@ -351,15 +351,20 @@ func (a *Agent) heartbeatLoop() {
 			publicIP = info.localIP
 		}
 
+		runningMatches, _ := a.docker.ListMatchIDs(context.Background())
+		if runningMatches == nil {
+			runningMatches = []string{}
+		}
 		hb := agentproto.Heartbeat{
-			UUID:      a.hostID,
-			Hostname:  info.hostname,
-			PublicIP:  publicIP,
-			LocalIP:   info.localIP,
-			CPU:       info.cpu,
-			MemMB:     info.memMB,
-			DiskGB:    info.diskGB,
-			Timestamp: time.Now().Unix(),
+			UUID:           a.hostID,
+			Hostname:       info.hostname,
+			PublicIP:       publicIP,
+			LocalIP:        info.localIP,
+			CPU:            info.cpu,
+			MemMB:          info.memMB,
+			DiskGB:         info.diskGB,
+			RunningMatches: runningMatches,
+			Timestamp:      time.Now().Unix(),
 		}
 		payload, err := json.Marshal(hb)
 		if err != nil {

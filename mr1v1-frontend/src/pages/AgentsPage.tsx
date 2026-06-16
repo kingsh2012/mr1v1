@@ -26,6 +26,7 @@ interface Agent {
   status: string
   rehlds_run_max: number
   rehlds_port_range: string
+  running_containers: string
   create_time: string
   update_time: string
   heartbeat_time: string
@@ -181,6 +182,16 @@ export default function AgentsPage() {
     },
     { title: 'REHLDS最大并发', dataIndex: 'rehlds_run_max', key: 'rehlds_run_max' },
     { title: 'REHLDS端口范围', dataIndex: 'rehlds_port_range', key: 'rehlds_port_range' },
+    {
+      title: '运行中容器',
+      dataIndex: 'running_containers',
+      key: 'running_containers',
+      render: (v: string) => v
+        ? v.split(',').map(id => (
+            <Tag key={id} color="blue" style={{ marginBottom: 2 }}>{id.slice(0, 8)}</Tag>
+          ))
+        : <Text type="secondary">无</Text>,
+    },
     {
       title: '创建时间',
       dataIndex: 'create_time',

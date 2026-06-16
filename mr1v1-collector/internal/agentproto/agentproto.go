@@ -20,15 +20,17 @@ const (
 
 // Heartbeat 由 agent 定期上报，consumer 将其 upsert 到 mr1v1_agent 表。
 // CPU 字段为 CPU 逻辑核心数（字符串形式，如 "4"），consumer 用它初始化 rehlds_run_max 默认值。
+// RunningMatches 为当前正在运行的 rehlds 容器的 match_id 列表。
 type Heartbeat struct {
-	UUID      string `json:"uuid"`
-	Hostname  string `json:"hostname"`
-	PublicIP  string `json:"public_ip"`
-	LocalIP   string `json:"local_ip"`
-	CPU       string `json:"cpu"`
-	MemMB     int64  `json:"mem_mb"`
-	DiskGB    int64  `json:"disk_gb"`
-	Timestamp int64  `json:"ts"`
+	UUID            string   `json:"uuid"`
+	Hostname        string   `json:"hostname"`
+	PublicIP        string   `json:"public_ip"`
+	LocalIP         string   `json:"local_ip"`
+	CPU             string   `json:"cpu"`
+	MemMB           int64    `json:"mem_mb"`
+	DiskGB          int64    `json:"disk_gb"`
+	RunningMatches  []string `json:"running_matches"`
+	Timestamp       int64    `json:"ts"`
 }
 
 // CreateCommand 由 backend 下发给指定 agent，指示其拉起一个 rehlds 容器。

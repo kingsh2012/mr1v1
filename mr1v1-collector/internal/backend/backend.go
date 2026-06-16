@@ -81,6 +81,8 @@ func (b *Backend) Handler() http.Handler {
 	mux := http.NewServeMux()
 	// 比赛
 	mux.HandleFunc("POST /api/matches", b.handleCreateMatch)
+	mux.HandleFunc("GET /api/matches", b.handleListMatches)
+	mux.HandleFunc("POST /api/matches/{id}/destroy", b.handleDestroyMatch)
 	// Agent 管理
 	mux.HandleFunc("GET /api/agents", b.handleListAgents)
 	mux.HandleFunc("PATCH /api/agents/{uuid}", b.handleUpdateAgent)
@@ -107,6 +109,32 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	}
 	slog.Info("agent status", "uuid", status.UUID, "match_id", status.MatchID,
 		"port", status.Port, "state", status.State, "message", status.Message)
+
+	// agent running → match waiting（容器就绪，等待玩家）
+	// agent error   → match error
+	// agent stopped → 若 match 还未 finished 则标记 error
+	var newState string
+	switch status.State {
+	case agentproto.StateRunning:
+		newState = "waiting"
+	case agentproto.StateError:
+		newState = "error"
+	case agentproto.StateStopped:
+		// 只在非 finished 状态下才更新为 error
+		b.pool.Exec(context.Background(),
+			`UPDATE mr1v1_match SET state='error', update_time=NOW()
+			 WHERE match_id=$1 AND state NOT IN ('finished','error')`,
+			status.MatchID)
+		return
+	default:
+		return
+	}
+	if _, err := b.pool.Exec(context.Background(),
+		`UPDATE mr1v1_match SET state=$1, update_time=NOW() WHERE match_id=$2`,
+		newState, status.MatchID,
+	); err != nil {
+		slog.Error("update match state failed", "error", err, "match_id", status.MatchID)
+	}
 }
 
 type createMatchRequest struct {
@@ -175,6 +203,16 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 写入比赛记录
+	if _, err := b.pool.Exec(ctx, `
+		INSERT INTO mr1v1_match
+			(match_id, p0_steamid, p1_steamid, server_name, agent_uuid, port, image, state)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,'creating')
+	`, matchID, req.P0SteamID, req.P1SteamID, serverName, uuid, port, image); err != nil {
+		slog.Error("insert match failed", "error", err)
+		// 非致命错误，不阻断响应
+	}
+
 	slog.Info("dispatched create command", "match_id", matchID, "uuid", uuid, "port", port, "image", image)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(createMatchResponse{MatchID: matchID, UUID: uuid, Port: port})
@@ -227,10 +265,10 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 			continue
 		}
 
-		// 查该agent当前running的比赛端口
+		// 查该agent当前活跃比赛占用的端口
 		busyRows, err := b.pool.Query(ctx, `
-			SELECT port FROM mr1v1_match_status
-			WHERE agent_uuid = $1 AND state = 'running'
+			SELECT port FROM mr1v1_match
+			WHERE agent_uuid = $1 AND state IN ('creating','waiting','playing')
 		`, c.uuid)
 		if err != nil {
 			// 表可能不存在，降级直接用第一个端口
@@ -253,6 +291,83 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid string, port int, err
 	return "", 0, fmt.Errorf("all agents are at capacity")
 }
 
+type matchRow struct {
+	MatchID    string    `json:"match_id"`
+	P0SteamID  string    `json:"p0_steamid"`
+	P1SteamID  string    `json:"p1_steamid"`
+	ServerName string    `json:"server_name"`
+	AgentUUID  string    `json:"agent_uuid"`
+	Port       int       `json:"port"`
+	Image      string    `json:"image"`
+	State      string    `json:"state"`
+	CreateTime time.Time `json:"create_time"`
+	UpdateTime time.Time `json:"update_time"`
+}
+
+func (b *Backend) handleListMatches(w http.ResponseWriter, r *http.Request) {
+	rows, err := b.pool.Query(r.Context(), `
+		SELECT match_id, p0_steamid, p1_steamid, server_name,
+		       agent_uuid, port, image, state, create_time, update_time
+		FROM mr1v1_match
+		ORDER BY create_time DESC
+		LIMIT 100
+	`)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
+
+	var result []matchRow
+	for rows.Next() {
+		var m matchRow
+		if err := rows.Scan(&m.MatchID, &m.P0SteamID, &m.P1SteamID, &m.ServerName,
+			&m.AgentUUID, &m.Port, &m.Image, &m.State, &m.CreateTime, &m.UpdateTime); err != nil {
+			continue
+		}
+		result = append(result, m)
+	}
+	if result == nil {
+		result = []matchRow{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
+
+func (b *Backend) handleDestroyMatch(w http.ResponseWriter, r *http.Request) {
+	matchID := r.PathValue("id")
+	if matchID == "" {
+		http.Error(w, "match_id required", http.StatusBadRequest)
+		return
+	}
+
+	// 查出 agent_uuid，通过 MQTT 下发销毁指令
+	var agentUUID string
+	err := b.pool.QueryRow(r.Context(),
+		`SELECT agent_uuid FROM mr1v1_match WHERE match_id=$1`, matchID,
+	).Scan(&agentUUID)
+	if err != nil {
+		http.Error(w, "match not found", http.StatusNotFound)
+		return
+	}
+
+	// 复用 CreateCommand 里的 MatchID 字段触发 agent 侧的 teardown
+	// agent 收到 destroy topic（未来可拓展为独立 topic，目前用 RCON destroy 流程）
+	// 这里先直接更新状态为 error，由 agent 的 RCON 销毁机制负责容器清理
+	// 如果需要立即强制销毁，需要单独的 destroy MQTT topic
+	cmd := map[string]string{"match_id": matchID, "action": "destroy"}
+	payload, _ := json.Marshal(cmd)
+	topic := agentproto.CreateTopic(agentUUID) // 暂复用 create topic，后续可扩展
+	b.client.Publish(topic+"_destroy", 1, false, payload)
+
+	// 标记状态为 error（前端销毁等同于强制终止）
+	b.pool.Exec(r.Context(),
+		`UPDATE mr1v1_match SET state='error', update_time=NOW() WHERE match_id=$1`, matchID)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+}
+
 // activeRehldsImage 从PG查询当前生效的rehlds镜像。
 func (b *Backend) activeRehldsImage(ctx context.Context) (string, error) {
 	var image string
@@ -268,25 +383,26 @@ func (b *Backend) activeRehldsImage(ctx context.Context) (string, error) {
 }
 
 type agentRow struct {
-	UUID          string    `json:"uuid"`
-	Hostname      string    `json:"hostname"`
-	PublicIP      string    `json:"public_ip"`
-	LocalIP       string    `json:"local_ip"`
-	CPU           string    `json:"cpu"`
-	MemMB         int64     `json:"mem_mb"`
-	DiskGB        int64     `json:"disk_gb"`
-	Status        string    `json:"status"`
-	RehldsRunMax  int       `json:"rehlds_run_max"`
-	PortRange     string    `json:"rehlds_port_range"`
-	CreateTime    time.Time `json:"create_time"`
-	UpdateTime    time.Time `json:"update_time"`
-	HeartbeatTime time.Time `json:"heartbeat_time"`
+	UUID               string    `json:"uuid"`
+	Hostname           string    `json:"hostname"`
+	PublicIP           string    `json:"public_ip"`
+	LocalIP            string    `json:"local_ip"`
+	CPU                string    `json:"cpu"`
+	MemMB              int64     `json:"mem_mb"`
+	DiskGB             int64     `json:"disk_gb"`
+	Status             string    `json:"status"`
+	RehldsRunMax       int       `json:"rehlds_run_max"`
+	PortRange          string    `json:"rehlds_port_range"`
+	RunningContainers  string    `json:"running_containers"`
+	CreateTime         time.Time `json:"create_time"`
+	UpdateTime         time.Time `json:"update_time"`
+	HeartbeatTime      time.Time `json:"heartbeat_time"`
 }
 
 func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.pool.Query(r.Context(), `
 		SELECT uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
-		       status, rehlds_run_max, rehlds_port_range,
+		       status, rehlds_run_max, rehlds_port_range, running_containers,
 		       create_time, update_time, heartbeat_time
 		FROM mr1v1_agent
 		ORDER BY heartbeat_time DESC
@@ -302,7 +418,7 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		var a agentRow
 		if err := rows.Scan(&a.UUID, &a.Hostname, &a.PublicIP, &a.LocalIP,
 			&a.CPU, &a.MemMB, &a.DiskGB, &a.Status,
-			&a.RehldsRunMax, &a.PortRange,
+			&a.RehldsRunMax, &a.PortRange, &a.RunningContainers,
 			&a.CreateTime, &a.UpdateTime, &a.HeartbeatTime); err != nil {
 			continue
 		}

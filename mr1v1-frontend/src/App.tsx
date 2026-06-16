@@ -1,15 +1,16 @@
 import { useState } from 'react'
 import { Layout, Menu } from 'antd'
-import { RobotOutlined, CloudServerOutlined } from '@ant-design/icons'
+import { RobotOutlined, CloudServerOutlined, TrophyOutlined } from '@ant-design/icons'
 import AgentsPage from './pages/AgentsPage'
 import RehldsConfigPage from './pages/RehldsConfigPage'
+import MatchesPage from './pages/MatchesPage'
 
 const { Sider, Content } = Layout
 
-type PageKey = 'agents' | 'rehlds'
+type PageKey = 'matches' | 'agents' | 'rehlds'
 
 export default function App() {
-  const [page, setPage] = useState<PageKey>('agents')
+  const [page, setPage] = useState<PageKey>('matches')
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -23,6 +24,7 @@ export default function App() {
           selectedKeys={[page]}
           onClick={({ key }) => setPage(key as PageKey)}
           items={[
+            { key: 'matches', icon: <TrophyOutlined />, label: '比赛管理' },
             { key: 'agents', icon: <RobotOutlined />, label: 'Agent 管理' },
             { key: 'rehlds', icon: <CloudServerOutlined />, label: 'Rehlds 镜像' },
           ]}
@@ -30,6 +32,7 @@ export default function App() {
       </Sider>
       <Layout>
         <Content style={{ padding: 24 }}>
+          {page === 'matches' && <MatchesPage />}
           {page === 'agents' && <AgentsPage />}
           {page === 'rehlds' && <RehldsConfigPage />}
         </Content>

@@ -124,6 +124,22 @@ func (c *Client) ensureImage(ctx context.Context, ref string) error {
 	return nil
 }
 
+// ListMatchIDs returns the match_ids of all currently running mr1v1 match containers.
+func (c *Client) ListMatchIDs(ctx context.Context) ([]string, error) {
+	f := filters.NewArgs(filters.Arg("label", LabelMatchID))
+	containers, err := c.cli.ContainerList(ctx, container.ListOptions{Filters: f})
+	if err != nil {
+		return nil, fmt.Errorf("list match containers: %w", err)
+	}
+	ids := make([]string, 0, len(containers))
+	for _, ct := range containers {
+		if mid := ct.Labels[LabelMatchID]; mid != "" {
+			ids = append(ids, mid)
+		}
+	}
+	return ids, nil
+}
+
 // StopAndRemoveByMatchID finds the container labeled with matchID, stops it
 // (with the given grace period) and removes it. Returns nil if no matching
 // container exists (already torn down).
