@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -229,12 +230,13 @@ func (c *Consumer) onHeartbeat(_ mqtt.Client, msg mqtt.Message) {
 }
 
 func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
+	cpuCount, _ := strconv.Atoi(hb.CPU)
 	_, err := c.pool.Exec(context.Background(), `
 		INSERT INTO mr1v1_agent
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
 			 status, rehlds_run_max, rehlds_port_range,
 			 create_time, update_time, heartbeat_time)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', CAST($5 AS INTEGER), '', NOW(), NOW(), NOW())
+		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', NOW(), NOW(), NOW())
 		ON CONFLICT (uuid) DO UPDATE SET
 			heartbeat_time = NOW(),
 			update_time = CASE
@@ -254,9 +256,9 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 			mem_mb    = EXCLUDED.mem_mb,
 			disk_gb   = EXCLUDED.disk_gb,
 			rehlds_run_max = CASE
-				WHEN mr1v1_agent.rehlds_run_max = 0 THEN CAST(EXCLUDED.cpu AS INTEGER)
+				WHEN mr1v1_agent.rehlds_run_max = 0 THEN $8
 				ELSE mr1v1_agent.rehlds_run_max
 			END
-	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB)
+	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount)
 	return err
 }
