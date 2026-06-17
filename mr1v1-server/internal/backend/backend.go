@@ -624,7 +624,7 @@ func (b *Backend) handleAgentContainers(w http.ResponseWriter, r *http.Request) 
 		http.Error(w, "agent not found", http.StatusNotFound)
 		return
 	}
-	if len(raw) == 0 {
+	if len(raw) == 0 || string(raw) == "null" {
 		raw = []byte("[]")
 	}
 	w.Header().Set("Content-Type", "application/json")

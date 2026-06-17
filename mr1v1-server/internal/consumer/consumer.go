@@ -267,7 +267,7 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 	cpuCount, _ := strconv.Atoi(hb.CPU)
 	runningContainers := strings.Join(hb.RunningMatches, ",")
 	containersJSON, _ := json.Marshal(hb.Containers)
-	if len(containersJSON) == 0 {
+	if len(containersJSON) == 0 || string(containersJSON) == "null" {
 		containersJSON = []byte("[]")
 	}
 	_, err := c.pool.Exec(context.Background(), `
