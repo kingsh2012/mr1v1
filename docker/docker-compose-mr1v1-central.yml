@@ -28,6 +28,7 @@ services:
       - BACKEND_URL=http://127.0.0.1:8181
       - WX_PORT=8082
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
+      - DATABASE_URL=${DATABASE_URL}
 
   mr1v1-manager-backend:
     image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.12
