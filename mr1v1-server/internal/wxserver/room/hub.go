@@ -84,6 +84,8 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 	}
 
 	// read loop
+	explicitClose := false
+readLoop:
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
@@ -104,23 +106,38 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 			h.handleConfirm(idx, openid, name, steamID, role)
 		case "cancel_confirm":
 			h.handleCancelConfirm(idx, role, name)
+		case "close_room":
+			if role == "creator" {
+				explicitClose = true
+				break readLoop
+			}
 		}
 	}
 
-	// disconnected
+	// disconnected（主动关闭或断线）
 	h.mu.Lock()
 	h.slots[idx] = nil
 	remaining := h.slots[1-idx]
 	h.mu.Unlock()
 
-	_ = h.store.LeaveRoom(context.Background(), h.roomID, openid)
-
-	if remaining != nil {
-		if role == "creator" {
+	switch {
+	case role == "creator" && explicitClose:
+		// 房主主动点击"关闭房间" → 软删除并踢出对手
+		_ = h.store.DeleteRoom(context.Background(), h.roomID)
+		if remaining != nil {
 			h.send(remaining.conn, Event{Type: "room_closed", Message: "房主已关闭房间"})
 			remaining.conn.Close()
-		} else {
-			h.send(remaining.conn, Event{Type: "player_left", Role: "joiner"})
+		}
+	case role == "creator":
+		// 房主仅断线（切页/切后台/网络抖动），不销毁房间，房主可重新连接
+		if remaining != nil {
+			h.send(remaining.conn, Event{Type: "player_left", Role: "creator", Name: name})
+		}
+	default:
+		// joiner 离开（主动或断线一视同仁）→ 清空 joiner，房间回到 waiting
+		_ = h.store.LeaveRoom(context.Background(), h.roomID, openid)
+		if remaining != nil {
+			h.send(remaining.conn, Event{Type: "player_left", Role: "joiner", Name: name})
 		}
 	}
 
@@ -182,6 +199,28 @@ func (h *Hub) triggerMatch(creator, joiner *slot) {
 
 	_ = h.store.SetRoomMatched(context.Background(), h.roomID, matchID, serverAddr)
 	h.broadcast(Event{Type: "matched", ServerAddr: serverAddr, MatchID: matchID})
+}
+
+// CloseByCreator 由 REST 接口触发（创建者在房间列表页直接销毁自己的房间，
+// 不一定正连着该房间的 WS）。踢出对手并断开双方现有连接。
+func (h *Hub) CloseByCreator() {
+	h.mu.Lock()
+	creator := h.slots[0]
+	joiner := h.slots[1]
+	h.slots[0] = nil
+	h.slots[1] = nil
+	h.mu.Unlock()
+
+	if joiner != nil {
+		h.send(joiner.conn, Event{Type: "room_closed", Message: "房主已关闭房间"})
+		joiner.conn.Close()
+	}
+	if creator != nil {
+		creator.conn.Close()
+	}
+	if h.onEmpty != nil {
+		h.onEmpty()
+	}
 }
 
 func (h *Hub) broadcast(e Event) {

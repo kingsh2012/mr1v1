@@ -58,9 +58,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 			server_addr     TEXT NOT NULL DEFAULT '',
 			match_id        TEXT NOT NULL DEFAULT '',
 			created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+			updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
 			deleted_at      TIMESTAMPTZ
 		);
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 	`)
 	return err
 }
@@ -215,39 +217,57 @@ func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) 
 
 func (s *Store) JoinRoom(ctx context.Context, id, joinerOpenID string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE wx_rooms SET joiner_openid = $2, status = 'ready'
+		UPDATE wx_rooms SET joiner_openid = $2, status = 'ready', updated_at = now()
 		WHERE id = $1 AND joiner_openid IS NULL AND status = 'waiting' AND deleted_at IS NULL
 	`, id, joinerOpenID)
 	return err
 }
 
+// LeaveRoom 仅处理 joiner 离开（清空 joiner，回到 waiting）。
+// creator 离开房间不再走这个方法——显式关闭走 DeleteRoom，断线不销毁房间（见 hub.go）。
 func (s *Store) LeaveRoom(ctx context.Context, id, openid string) error {
-	// creator 离开 → 删除房间；joiner 离开 → 清空 joiner，回到 waiting
 	_, err := s.pool.Exec(ctx, `
-		DO $$
-		DECLARE r wx_rooms%ROWTYPE;
-		BEGIN
-			SELECT * INTO r FROM wx_rooms WHERE id = $1 AND deleted_at IS NULL;
-			IF r.creator_openid = $2 THEN
-				UPDATE wx_rooms SET deleted_at = now() WHERE id = $1;
-			ELSIF r.joiner_openid = $2 THEN
-				UPDATE wx_rooms SET joiner_openid = NULL, status = 'waiting' WHERE id = $1;
-			END IF;
-		END $$;
+		UPDATE wx_rooms SET joiner_openid = NULL, status = 'waiting', updated_at = now()
+		WHERE id = $1 AND joiner_openid = $2 AND deleted_at IS NULL
 	`, id, openid)
 	return err
 }
 
 func (s *Store) SetRoomMatched(ctx context.Context, id, matchID, serverAddr string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE wx_rooms SET status='matched', match_id=$2, server_addr=$3 WHERE id=$1 AND deleted_at IS NULL
+		UPDATE wx_rooms SET status='matched', match_id=$2, server_addr=$3, updated_at = now() WHERE id=$1 AND deleted_at IS NULL
 	`, id, matchID, serverAddr)
 	return err
 }
 
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE wx_rooms SET deleted_at = now() WHERE id = $1`, id)
+	_, err := s.pool.Exec(ctx, `UPDATE wx_rooms SET deleted_at = now(), updated_at = now() WHERE id = $1`, id)
 	return err
+}
+
+// StaleRoomIDs 返回长时间无状态变化的活跃房间 ID（status 仍是 waiting/ready，
+// 超过 idleFor 没有任何更新）。调用方需结合内存中的连接状态（room.Manager）
+// 二次过滤掉仍有人在线的房间，避免误杀正在等待对手的合法房间。
+func (s *Store) StaleRoomIDs(ctx context.Context, idleFor time.Duration) ([]string, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id FROM wx_rooms
+		WHERE status IN ('waiting','ready') AND deleted_at IS NULL
+		  AND updated_at < now() - $1 * INTERVAL '1 second'
+	`, idleFor.Seconds())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			continue
+		}
+		ids = append(ids, id)
+	}
+	return ids, rows.Err()
 }
 
 // ── Legacy Players ──────────────────────────────────────────────────────────

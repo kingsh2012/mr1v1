@@ -104,11 +104,36 @@ func JoinRoom(s *store.Store) gin.HandlerFunc {
 	}
 }
 
-func LeaveRoom(s *store.Store) gin.HandlerFunc {
+// LeaveRoom 处理 DELETE /rooms/:id：creator 调用 = 销毁房间（软删除+踢出对手），
+// joiner 调用 = 仅退出该房间（房间回到 waiting，等待新对手）。
+func LeaveRoom(s *store.Store, mgr *room.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if err := s.LeaveRoom(c.Request.Context(), c.Param("id"), openid(c)); err != nil {
+		roomID := c.Param("id")
+		oid := openid(c)
+
+		rm, err := s.GetRoom(c.Request.Context(), roomID)
+		if err != nil {
 			resp.Fail(c, 500, "db error")
 			return
+		}
+		if rm == nil {
+			resp.OK(c, gin.H{"ok": "1"})
+			return
+		}
+
+		if rm.CreatorOpenID == oid {
+			if err := s.DeleteRoom(c.Request.Context(), roomID); err != nil {
+				resp.Fail(c, 500, "db error")
+				return
+			}
+			if hub, ok := mgr.GetIfExists(roomID); ok {
+				hub.CloseByCreator()
+			}
+		} else {
+			if err := s.LeaveRoom(c.Request.Context(), roomID, oid); err != nil {
+				resp.Fail(c, 500, "db error")
+				return
+			}
 		}
 		resp.OK(c, gin.H{"ok": "1"})
 	}

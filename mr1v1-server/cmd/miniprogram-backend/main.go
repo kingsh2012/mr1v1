@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	wxconfig "mr1v1-server/internal/wxserver/config"
@@ -34,6 +35,8 @@ func main() {
 	mm := matchmaker.New(cfg.BackendURL, cfg.InternalAPIKey)
 	mgr := room.NewManager(cfg.BackendURL, cfg.InternalAPIKey, s)
 
+	go sweepStaleRooms(ctx, s, mgr, time.Duration(cfg.RoomStaleMinutes)*time.Minute)
+
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(handlers.CORS())
@@ -49,7 +52,7 @@ func main() {
 	auth.GET("/rooms", handlers.ListRooms(s))
 	auth.POST("/rooms", handlers.CreateRoom(s))
 	auth.POST("/rooms/:id/join", handlers.JoinRoom(s))
-	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s))
+	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s, mgr))
 	auth.POST("/legacy-players/bind", handlers.BindLegacyPlayer(s))
 
 	ws := r.Group("/ws/wx")
@@ -59,5 +62,39 @@ func main() {
 	slog.Info("mr1v1-wx listening", "addr", ":"+cfg.Port, "backend", cfg.BackendURL)
 	if err := r.Run(":" + cfg.Port); err != nil {
 		slog.Error("server stopped", "error", err)
+	}
+}
+
+// sweepStaleRooms 定时清理长时间无状态变化且当前无人在线的房间（孤儿房间、
+// 双方早已断线但房间一直停留在 waiting/ready 的情况），软删除。
+// 仍有人在线（room.Manager 里存在对应 Hub）的房间不会被清理，即使等待对手
+// 的时间很长——只清理"确实没人了"的房间。
+func sweepStaleRooms(ctx context.Context, s *store.Store, mgr *room.Manager, idleFor time.Duration) {
+	if idleFor <= 0 {
+		return
+	}
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			ids, err := s.StaleRoomIDs(ctx, idleFor)
+			if err != nil {
+				slog.Error("sweep stale rooms query failed", "error", err)
+				continue
+			}
+			for _, id := range ids {
+				if mgr.IsActive(id) {
+					continue
+				}
+				if err := s.DeleteRoom(ctx, id); err != nil {
+					slog.Error("sweep stale room failed", "room", id, "error", err)
+					continue
+				}
+				slog.Info("auto-closed stale room", "room", id, "idle_for", idleFor)
+			}
+		}
 	}
 }
