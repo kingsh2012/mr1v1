@@ -7,6 +7,7 @@ import (
 	"github.com/gorilla/websocket"
 	"mr1v1-server/internal/wxserver/matchmaker"
 	"mr1v1-server/internal/wxserver/models"
+	"mr1v1-server/internal/wxserver/store"
 )
 
 var upgrader = websocket.Upgrader{
@@ -19,7 +20,7 @@ type joinMsg struct {
 	SteamID string `json:"steamid"`
 }
 
-func MatchmakingHandler(mm *matchmaker.Matchmaker) http.HandlerFunc {
+func MatchmakingHandler(mm *matchmaker.Matchmaker, s *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		conn, err := upgrader.Upgrade(w, r, nil)
 		if err != nil {
@@ -41,7 +42,7 @@ func MatchmakingHandler(mm *matchmaker.Matchmaker) http.HandlerFunc {
 			return
 		}
 
-		openid, ok := GetOpenIDByToken(join.Token)
+		openid, ok := s.GetOpenIDByToken(r.Context(), join.Token)
 		if !ok {
 			conn.WriteJSON(models.MatchMessage{Type: "error", Message: "invalid token"})
 			return

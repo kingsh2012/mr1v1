@@ -4,23 +4,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
-	"sync"
 
 	"github.com/google/uuid"
 	"mr1v1-server/internal/wxserver/config"
-)
-
-var (
-	tokenStore = map[string]string{} // token -> openid
-	storeMu    sync.RWMutex
+	"mr1v1-server/internal/wxserver/store"
 )
 
 type loginRequest struct {
 	Code string `json:"code"`
 }
 
-func LoginHandler(cfg *config.WxConfig) http.HandlerFunc {
+func LoginHandler(cfg *config.WxConfig, s *store.Store) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if r.Method == http.MethodOptions {
@@ -45,21 +41,22 @@ func LoginHandler(cfg *config.WxConfig) http.HandlerFunc {
 			return
 		}
 
+		if err := s.UpsertUser(r.Context(), openid); err != nil {
+			slog.Warn("upsert wx_user failed", "openid", openid, "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
+
 		token := uuid.New().String()
-		storeMu.Lock()
-		tokenStore[token] = openid
-		storeMu.Unlock()
+		if err := s.CreateSession(r.Context(), token, openid); err != nil {
+			slog.Warn("create session failed", "err", err)
+			http.Error(w, "db error", http.StatusInternalServerError)
+			return
+		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"token": token})
+		json.NewEncoder(w).Encode(map[string]string{"token": token, "openid": openid})
 	}
-}
-
-func GetOpenIDByToken(token string) (string, bool) {
-	storeMu.RLock()
-	defer storeMu.RUnlock()
-	openid, ok := tokenStore[token]
-	return openid, ok
 }
 
 func fetchOpenID(cfg *config.WxConfig, code string) (string, error) {
