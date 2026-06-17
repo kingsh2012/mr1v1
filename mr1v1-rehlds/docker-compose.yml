@@ -1,0 +1,20 @@
+services:
+  rehlds:
+    build: .
+    image: rehlds-1v1:latest
+    container_name: rehlds-1v1
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      SERVER_HOSTNAME: ${SERVER_HOSTNAME:-1v1 Test Server}
+      MAXPLAYERS: ${MAXPLAYERS:-10}
+      RCON_PASSWORD: ${RCON_PASSWORD:-test1234}
+      PORT: ${PORT:-27015}
+    volumes:
+      - ./logs/server:/opt/rehlds/cstrike/logs
+      - ./logs/amxmodx:/opt/rehlds/cstrike/addons/amxmodx/logs
+      # 可选：挂载cvar覆盖文件，里面只需写要改的cvar，例如:
+      #   mp_roundtime "1"
+      #   mp_autokick "0"
+      # 启动时会合并进容器内的 cstrike/server.cfg（已存在则覆盖值，不存在则追加）
+      - ./config-overrides/server.cfg:/opt/rehlds/config-overrides/server.cfg:ro

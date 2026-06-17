@@ -1,5 +1,0 @@
-cstrike/logs/*
-cstrike/addons/amxmodx/logs/*
-*.dmp
-*.log
-core
