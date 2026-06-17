@@ -24,6 +24,16 @@ mr1v1-miniprogram/      ← 微信小程序（独立 git 仓库，.gitignore 排
 
 ## mr1v1-server Go module
 
+### 编译资源限制
+
+执行 `go build` / `go test` / `go vet` 等命令时，必须限制为单核，避免把宿主机 CPU 跑满：
+
+```bash
+GOMAXPROCS=1 go build -p=1 ./...
+```
+
+**gin 版本 v1.12.0（最新）**：该版本起 gin 核心包直接依赖了 `github.com/quic-go/quic-go`（含 http3，TLS握手/拥塞控制协议栈）和 `go.mongodb.org/mongo-driver/v2/bson`，项目本身不需要 HTTP/3 或 MongoDB，但只要 import gin 就会一起编译，单核冷编译耗时约3-4分钟、内存峰值约2GB（已在3.8GB内存的VPS上实测通过，全程无swap）。如果在更小内存的机器上编译此项目，要先确认资源是否足够，或考虑临时降级到 v1.9.1（依赖干净、编译只需十几秒）。升级 gin 前建议用 `go mod why github.com/quic-go/quic-go` 检查新版本是否又引入了类似的重依赖。
+
 ### cmd 目录
 
 ```
