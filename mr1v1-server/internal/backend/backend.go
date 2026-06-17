@@ -934,7 +934,12 @@ func (b *Backend) authMiddleware(apiPrefix string, next http.Handler) http.Handl
 			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
 			return
 		}
-		// 非 API 页面请求：交给前端路由处理（返回 index.html，React 负责跳转 /login）
+		// 静态资源直接放行（JS/CSS/图标等，浏览器加载登录页时需要）
+		if strings.HasPrefix(r.URL.Path, "/assets/") || strings.ContainsRune(r.URL.Path[1:], '.') {
+			next.ServeHTTP(w, r)
+			return
+		}
+		// SPA 页面请求：返回 index.html，React 负责跳转 /login
 		r.URL.Path = "/"
 		next.ServeHTTP(w, r)
 	})
