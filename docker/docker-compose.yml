@@ -1,6 +1,6 @@
 services:
   mr1v1-consumer:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.8
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.9
     container_name: mr1v1-consumer
     restart: unless-stopped
     network_mode: host
@@ -20,7 +20,7 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
   mr1v1-miniprogram-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.5
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.10
     container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
@@ -33,7 +33,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
 
   mr1v1-manager-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.16
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.17
     container_name: mr1v1-manager-backend
     restart: unless-stopped
     network_mode: host
