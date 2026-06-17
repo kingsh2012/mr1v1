@@ -1,6 +1,6 @@
 services:
   mr1v1-consumer:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.6
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.8
     container_name: mr1v1-consumer
     restart: unless-stopped
     network_mode: host
@@ -18,7 +18,7 @@ services:
       - DB_TIMEZONE=Asia/Shanghai
 
   mr1v1-miniprogram-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.1
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.2
     container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
@@ -31,7 +31,7 @@ services:
       - DATABASE_URL=${DATABASE_URL}
 
   mr1v1-manager-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.13
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.16
     container_name: mr1v1-manager-backend
     restart: unless-stopped
     network_mode: host
