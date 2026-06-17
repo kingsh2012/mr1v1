@@ -1,6 +1,14 @@
 PROCS.PRO-REHLDS-LINUX-PROD/
 PROCS.PRO-REHLDS-STARTUP/
 PROCS.PRO-REHLDS-COLLECTION-SYSTEM/
+mr1v1-miniprogram/
+# Go binaries
+mr1v1-server/mr1v1-*
+mr1v1-server/cmd/*/dist
+# Frontend build artifacts in wrong locations
+mr1v1-collector/internal/backend/static/assets/
+mr1v1-collector/internal/backend/static/*.html
+mr1v1-collector/internal/backend/static/*.svg
 server/*
 !server/Dockerfile
 !server/.dockerignore
