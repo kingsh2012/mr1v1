@@ -22,8 +22,8 @@ interface Match {
   port: number
   image: string
   state: string
-  create_time: string
-  update_time: string
+  created_at: string
+  updated_at: string
 }
 
 interface OpLog {
@@ -249,7 +249,7 @@ export default function MatchesPage() {
       form.resetFields()
       fetchMatches()
     } catch (e: any) {
-      message.error(e?.response?.data || '创建失败')
+      message.error(e?.response?.data?.message || '创建失败')
     } finally {
       setCreating(false)
     }
@@ -289,7 +289,7 @@ export default function MatchesPage() {
       const res = await api.get<ServerQuery>(`/matches/${matchID}/server`)
       setServerCache(prev => ({ ...prev, [matchID]: res.data }))
     } catch (e: any) {
-      const msg = e?.response?.data || e?.message || '请求失败'
+      const msg = e?.response?.data?.message || e?.message || '请求失败'
       setServerCache(prev => ({
         ...prev,
         [matchID]: { info_error: msg, players_error: msg, rules_error: msg },
@@ -380,9 +380,9 @@ export default function MatchesPage() {
     { title: '服务器名', dataIndex: 'server_name', key: 'server_name' },
     { title: 'Agent', dataIndex: 'agent_uuid', key: 'agent_uuid', ellipsis: true },
     { title: '端口', dataIndex: 'port', key: 'port', width: 80 },
-    { title: '创建时间', dataIndex: 'create_time', key: 'create_time',
+    { title: '创建时间', dataIndex: 'created_at', key: 'created_at',
       render: (v: string) => dayjs(v).format(FMT) },
-    { title: '更新时间', dataIndex: 'update_time', key: 'update_time',
+    { title: '更新时间', dataIndex: 'updated_at', key: 'updated_at',
       render: (v: string) => <Text type="secondary">{dayjs(v).format(FMT)}</Text> },
     {
       title: '操作', key: 'action', width: 160,

@@ -1,61 +1,48 @@
 package handlers
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
 
+	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
+	"mr1v1-server/internal/resp"
 	"mr1v1-server/internal/wxserver/config"
 	"mr1v1-server/internal/wxserver/store"
 )
 
-type loginRequest struct {
-	Code string `json:"code"`
-}
-
-func LoginHandler(cfg *config.WxConfig, s *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			w.WriteHeader(http.StatusNoContent)
-			return
+func Login(cfg *config.WxConfig, s *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Code string `json:"code" binding:"required"`
 		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		var req loginRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Code == "" {
-			http.Error(w, "bad request", http.StatusBadRequest)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			resp.Fail(c, 400, "code required")
 			return
 		}
 
 		openid, err := fetchOpenID(cfg, req.Code)
 		if err != nil {
-			http.Error(w, "failed to get openid: "+err.Error(), http.StatusInternalServerError)
+			resp.Fail(c, 500, "failed to get openid: "+err.Error())
 			return
 		}
 
-		if err := s.UpsertUser(r.Context(), openid); err != nil {
+		if err := s.UpsertUser(c.Request.Context(), openid); err != nil {
 			slog.Warn("upsert wx_user failed", "openid", openid, "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
+			resp.Fail(c, 500, "db error")
 			return
 		}
 
 		token := uuid.New().String()
-		if err := s.CreateSession(r.Context(), token, openid); err != nil {
+		if err := s.CreateSession(c.Request.Context(), token, openid); err != nil {
 			slog.Warn("create session failed", "err", err)
-			http.Error(w, "db error", http.StatusInternalServerError)
+			resp.Fail(c, 500, "db error")
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"token": token, "openid": openid})
+		resp.OK(c, gin.H{"token": token, "openid": openid})
 	}
 }
 
@@ -64,19 +51,19 @@ func fetchOpenID(cfg *config.WxConfig, code string) (string, error) {
 		"https://api.weixin.qq.com/sns/jscode2session?appid=%s&secret=%s&js_code=%s&grant_type=authorization_code",
 		cfg.WxAppID, cfg.WxAppSecret, code,
 	)
-	resp, err := http.Get(url) //nolint:gosec
+	httpResp, err := http.Get(url) //nolint:gosec
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer httpResp.Body.Close()
 
-	body, _ := io.ReadAll(resp.Body)
+	body, _ := io.ReadAll(httpResp.Body)
 	var result struct {
 		OpenID  string `json:"openid"`
 		ErrMsg  string `json:"errmsg"`
 		ErrCode int    `json:"errcode"`
 	}
-	if err := json.Unmarshal(body, &result); err != nil {
+	if err := unmarshalJSON(body, &result); err != nil {
 		return "", err
 	}
 	if result.OpenID == "" {

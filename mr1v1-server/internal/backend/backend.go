@@ -18,13 +18,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gin-gonic/gin"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"mr1v1-server/internal/agentproto"
 	"mr1v1-server/internal/config"
 	"mr1v1-server/internal/legacy"
 	"mr1v1-server/internal/model"
+	"mr1v1-server/internal/resp"
 	"mr1v1-server/pkg/a2s"
 )
 
@@ -125,9 +129,9 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 	rows, err := b.pool.Query(ctx, `
 		SELECT match_id, agent_uuid, state
 		FROM manager_matches
-		WHERE (state = 'waiting'  AND update_time < NOW() - $1 * INTERVAL '1 second')
-		   OR (state = 'playing'  AND update_time < NOW() - $2 * INTERVAL '1 second')
-		   OR (state = 'creating' AND update_time < NOW() - $1 * INTERVAL '1 second')
+		WHERE (state = 'waiting'  AND updated_at < NOW() - $1 * INTERVAL '1 second')
+		   OR (state = 'playing'  AND updated_at < NOW() - $2 * INTERVAL '1 second')
+		   OR (state = 'creating' AND updated_at < NOW() - $1 * INTERVAL '1 second')
 	`, waitSec, playSec)
 	if err != nil {
 		slog.Error("timeout sweep query failed", "error", err)
@@ -157,46 +161,56 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 			slog.Error("publish timeout destroy failed", "error", token.Error(), "match_id", m.matchID)
 		}
 		b.pool.Exec(ctx,
-			`UPDATE manager_matches SET state='timeout', update_time=NOW() WHERE match_id=$1`, m.matchID)
+			`UPDATE manager_matches SET state='timeout', updated_at=NOW() WHERE match_id=$1`, m.matchID)
 		b.writeLog(m.matchID, "platform", "timeout_destroy", map[string]any{
-				"prev_state":   m.state,
-				"agent_uuid":   m.agentUUID,
-				"waiting_sec":  waitSec,
-				"playing_sec":  playSec,
-			})
+			"prev_state":  m.state,
+			"agent_uuid":  m.agentUUID,
+			"waiting_sec": waitSec,
+			"playing_sec": playSec,
+		})
 	}
 }
 
 // Handler 返回HTTP API路由，prefix 为路由前缀（如 "/api/manager"）。
 func (b *Backend) Handler(prefix string) http.Handler {
-	mux := http.NewServeMux()
+	r := gin.New()
+	r.Use(gin.Recovery())
+	r.Use(b.authMiddleware(prefix))
+
+	api := r.Group(prefix)
 	// 比赛
-	mux.HandleFunc("POST "+prefix+"/matches", b.handleCreateMatch)
-	mux.HandleFunc("GET "+prefix+"/matches", b.handleListMatches)
-	mux.HandleFunc("GET "+prefix+"/matches/{id}/logs", b.handleMatchLogs)
-	mux.HandleFunc("GET "+prefix+"/matches/{id}/server", b.handleMatchServer)
-	mux.HandleFunc("POST "+prefix+"/matches/{id}/end", b.handleEndMatch)
-	mux.HandleFunc("POST "+prefix+"/matches/{id}/destroy", b.handleDestroyMatch)
+	api.POST("/matches", b.handleCreateMatch)
+	api.GET("/matches", b.handleListMatches)
+	api.GET("/matches/:id/logs", b.handleMatchLogs)
+	api.GET("/matches/:id/server", b.handleMatchServer)
+	api.POST("/matches/:id/end", b.handleEndMatch)
+	api.POST("/matches/:id/destroy", b.handleDestroyMatch)
 	// Agent 管理
-	mux.HandleFunc("GET "+prefix+"/agents", b.handleListAgents)
-	mux.HandleFunc("PATCH "+prefix+"/agents/{uuid}", b.handleUpdateAgent)
-	mux.HandleFunc("GET "+prefix+"/agents/{uuid}/containers", b.handleAgentContainers)
+	api.GET("/agents", b.handleListAgents)
+	api.PATCH("/agents/:uuid", b.handleUpdateAgent)
+	api.GET("/agents/:uuid/containers", b.handleAgentContainers)
 	// Rehlds 镜像配置
-	mux.HandleFunc("GET "+prefix+"/rehlds-configs", b.handleListRehldsConfigs)
-	mux.HandleFunc("POST "+prefix+"/rehlds-configs", b.handleCreateRehldsConfig)
-	mux.HandleFunc("PATCH "+prefix+"/rehlds-configs/{id}/activate", b.handleActivateRehldsConfig)
+	api.GET("/rehlds-configs", b.handleListRehldsConfigs)
+	api.POST("/rehlds-configs", b.handleCreateRehldsConfig)
+	api.PATCH("/rehlds-configs/:id/activate", b.handleActivateRehldsConfig)
 	// 认证（免鉴权）
-	mux.HandleFunc("POST "+prefix+"/auth/login", b.handleLogin)
-	mux.HandleFunc("POST "+prefix+"/auth/logout", b.handleLogout)
-	// 健康检查 & 静态文件
-	mux.HandleFunc("GET "+prefix+"/healthz", b.handleHealthz)
-	mux.Handle("/", b.staticHandler())
-	return b.authMiddleware(prefix, mux)
+	api.POST("/auth/login", b.handleLogin)
+	api.POST("/auth/logout", b.handleLogout)
+	// 健康检查
+	api.GET("/healthz", b.handleHealthz)
+	// 小程序侧数据只读查看（房间/微信用户/老玩家）
+	api.GET("/wx-rooms", b.handleListWxRooms)
+	api.GET("/wx-users", b.handleListWxUsers)
+	api.GET("/legacy-players", b.handleListLegacyPlayers)
+
+	// 静态文件 & SPA 路由兜底
+	r.NoRoute(gin.WrapH(b.staticHandler()))
+
+	return r
 }
 
-func (b *Backend) handleHealthz(w http.ResponseWriter, _ *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("ok"))
+func (b *Backend) handleHealthz(c *gin.Context) {
+	resp.OK(c, "ok")
 }
 
 func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
@@ -222,7 +236,7 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	case agentproto.StateStopped:
 		// 只有意外停止才标 error；finished/terminated/timeout/error 已是终态不覆盖
 		b.pool.Exec(context.Background(),
-			`UPDATE manager_matches SET state='error', update_time=NOW()
+			`UPDATE manager_matches SET state='error', updated_at=NOW()
 			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','timeout','error')`,
 			status.MatchID)
 		b.writeLog(status.MatchID, "agent", "container_stopped", status)
@@ -231,7 +245,7 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 		return
 	}
 	if _, err := b.pool.Exec(context.Background(),
-		`UPDATE manager_matches SET state=$1, update_time=NOW() WHERE match_id=$2`,
+		`UPDATE manager_matches SET state=$1, updated_at=NOW() WHERE match_id=$2`,
 		newState, status.MatchID,
 	); err != nil {
 		slog.Error("update match state failed", "error", err, "match_id", status.MatchID)
@@ -246,41 +260,41 @@ type createMatchRequest struct {
 }
 
 type createMatchResponse struct {
-	MatchID   string `json:"match_id"`
-	UUID      string `json:"uuid"`
-	PublicIP  string `json:"public_ip"`
-	Port      int    `json:"port"`
+	MatchID  string `json:"match_id"`
+	UUID     string `json:"uuid"`
+	PublicIP string `json:"public_ip"`
+	Port     int    `json:"port"`
 }
 
-func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) handleCreateMatch(c *gin.Context) {
 	var req createMatchRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json: "+err.Error(), http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, 400, "invalid json: "+err.Error())
 		return
 	}
 	if req.P0SteamID == "" || req.P1SteamID == "" {
-		http.Error(w, "p0_steamid and p1_steamid are required", http.StatusBadRequest)
+		resp.Fail(c, 400, "p0_steamid and p1_steamid are required")
 		return
 	}
 
 	matchID, err := generateMatchID()
 	if err != nil {
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "internal error")
 		return
 	}
 
-	ctx := r.Context()
+	ctx := c.Request.Context()
 	uuid, publicIP, port, err := b.pickAgentPort(ctx)
 	if err != nil {
 		slog.Error("pick agent failed", "error", err)
-		http.Error(w, "no idle agent available", http.StatusServiceUnavailable)
+		resp.Fail(c, 503, "no idle agent available")
 		return
 	}
 
 	image, err := b.activeRehldsImage(ctx)
 	if err != nil {
 		slog.Error("get rehlds image failed", "error", err)
-		http.Error(w, "rehlds config not found", http.StatusServiceUnavailable)
+		resp.Fail(c, 503, "rehlds config not found")
 		return
 	}
 
@@ -302,7 +316,7 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 	topic := agentproto.CreateTopic(uuid)
 	if token := b.client.Publish(topic, 1, false, payload); token.Wait() && token.Error() != nil {
 		slog.Error("publish create command failed", "error", token.Error())
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "internal error")
 		return
 	}
 
@@ -322,8 +336,7 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 	})
 
 	slog.Info("dispatched create command", "match_id", matchID, "uuid", uuid, "port", port, "image", image)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(createMatchResponse{MatchID: matchID, UUID: uuid, PublicIP: publicIP, Port: port})
+	resp.OK(c, createMatchResponse{MatchID: matchID, UUID: uuid, PublicIP: publicIP, Port: port})
 }
 
 // pickAgentPort 从PG查询一个可用agent并分配端口。
@@ -339,10 +352,10 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 		SELECT uuid, public_ip, rehlds_port_range, rehlds_run_max
 		FROM manager_agents
 		WHERE status = 'enabled'
-		  AND heartbeat_time > NOW() - $1 * INTERVAL '1 second'
+		  AND heartbeat_at > NOW() - $1 * INTERVAL '1 second'
 		  AND rehlds_run_max > 0
 		  AND rehlds_port_range != ''
-		ORDER BY heartbeat_time DESC
+		ORDER BY heartbeat_at DESC
 	`, stale)
 	if err != nil {
 		return "", "", 0, err
@@ -415,20 +428,20 @@ type matchRow struct {
 	Port       int       `json:"port"`
 	Image      string    `json:"image"`
 	State      string    `json:"state"`
-	CreateTime time.Time `json:"create_time"`
-	UpdateTime time.Time `json:"update_time"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
-func (b *Backend) handleListMatches(w http.ResponseWriter, r *http.Request) {
-	rows, err := b.pool.Query(r.Context(), `
+func (b *Backend) handleListMatches(c *gin.Context) {
+	rows, err := b.pool.Query(c.Request.Context(), `
 		SELECT match_id, p0_steamid, p1_steamid, server_name,
-		       agent_uuid, port, image, state, create_time, update_time
+		       agent_uuid, port, image, state, created_at, updated_at
 		FROM manager_matches
-		ORDER BY create_time DESC
+		ORDER BY created_at DESC
 		LIMIT 100
 	`)
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
 	defer rows.Close()
@@ -437,7 +450,7 @@ func (b *Backend) handleListMatches(w http.ResponseWriter, r *http.Request) {
 	for rows.Next() {
 		var m matchRow
 		if err := rows.Scan(&m.MatchID, &m.P0SteamID, &m.P1SteamID, &m.ServerName,
-			&m.AgentUUID, &m.Port, &m.Image, &m.State, &m.CreateTime, &m.UpdateTime); err != nil {
+			&m.AgentUUID, &m.Port, &m.Image, &m.State, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			continue
 		}
 		result = append(result, m)
@@ -445,33 +458,32 @@ func (b *Backend) handleListMatches(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []matchRow{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	resp.OK(c, result)
 }
 
 // handleEndMatch 优雅结束比赛：agent 先发 RCON 倒计时再 docker stop。
-func (b *Backend) handleEndMatch(w http.ResponseWriter, r *http.Request) {
-	b.dispatchDestroy(w, r, false)
+func (b *Backend) handleEndMatch(c *gin.Context) {
+	b.dispatchDestroy(c, false)
 }
 
 // handleDestroyMatch 强制销毁：agent 直接 docker stop，不走 RCON。
-func (b *Backend) handleDestroyMatch(w http.ResponseWriter, r *http.Request) {
-	b.dispatchDestroy(w, r, true)
+func (b *Backend) handleDestroyMatch(c *gin.Context) {
+	b.dispatchDestroy(c, true)
 }
 
-func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force bool) {
-	matchID := r.PathValue("id")
+func (b *Backend) dispatchDestroy(c *gin.Context, force bool) {
+	matchID := c.Param("id")
 	if matchID == "" {
-		http.Error(w, "match_id required", http.StatusBadRequest)
+		resp.Fail(c, 400, "match_id required")
 		return
 	}
 
 	var agentUUID string
-	err := b.pool.QueryRow(r.Context(),
+	err := b.pool.QueryRow(c.Request.Context(),
 		`SELECT agent_uuid FROM manager_matches WHERE match_id=$1`, matchID,
 	).Scan(&agentUUID)
 	if err != nil {
-		http.Error(w, "match not found", http.StatusNotFound)
+		resp.Fail(c, 404, "match not found")
 		return
 	}
 
@@ -480,13 +492,13 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 	topic := agentproto.DestroyTopic(agentUUID)
 	if token := b.client.Publish(topic, 1, false, payload); token.Wait() && token.Error() != nil {
 		slog.Error("publish destroy command failed", "error", token.Error(), "match_id", matchID)
-		http.Error(w, "internal error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "internal error")
 		return
 	}
 
 	// 平台主动终止 → terminated（不参与结算），区别于正常 finished 和意外 error
-	b.pool.Exec(r.Context(),
-		`UPDATE manager_matches SET state='terminated', update_time=NOW() WHERE match_id=$1`, matchID)
+	b.pool.Exec(c.Request.Context(),
+		`UPDATE manager_matches SET state='terminated', updated_at=NOW() WHERE match_id=$1`, matchID)
 
 	action := "end_dispatched"
 	if force {
@@ -498,8 +510,7 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 	})
 
 	slog.Info("dispatched destroy command", "match_id", matchID, "force", force, "agent", agentUUID)
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	resp.OK(c, gin.H{"status": "ok"})
 }
 
 type opLogRow struct {
@@ -511,16 +522,16 @@ type opLogRow struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-func (b *Backend) handleMatchLogs(w http.ResponseWriter, r *http.Request) {
-	matchID := r.PathValue("id")
-	rows, err := b.pool.Query(r.Context(), `
+func (b *Backend) handleMatchLogs(c *gin.Context) {
+	matchID := c.Param("id")
+	rows, err := b.pool.Query(c.Request.Context(), `
 		SELECT id, match_id, actor, action, detail, created_at
 		FROM manager_operation_logs
 		WHERE match_id = $1
 		ORDER BY created_at ASC
 	`, matchID)
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
 	defer rows.Close()
@@ -535,8 +546,7 @@ func (b *Backend) handleMatchLogs(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []opLogRow{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	resp.OK(c, result)
 }
 
 // writeLog 写一条操作日志，detail 传任意可序列化结构体或 map，非阻塞。
@@ -573,31 +583,31 @@ func (b *Backend) activeRehldsImage(ctx context.Context) (string, error) {
 }
 
 type agentRow struct {
-	UUID               string    `json:"uuid"`
-	Hostname           string    `json:"hostname"`
-	PublicIP           string    `json:"public_ip"`
-	LocalIP            string    `json:"local_ip"`
-	CPU                string    `json:"cpu"`
-	MemMB              int64     `json:"mem_mb"`
-	DiskGB             int64     `json:"disk_gb"`
-	Status             string    `json:"status"`
-	RehldsRunMax       int       `json:"rehlds_run_max"`
-	PortRange          string    `json:"rehlds_port_range"`
-	CreateTime         time.Time `json:"create_time"`
-	UpdateTime         time.Time `json:"update_time"`
-	HeartbeatTime      time.Time `json:"heartbeat_time"`
+	UUID         string    `json:"uuid"`
+	Hostname     string    `json:"hostname"`
+	PublicIP     string    `json:"public_ip"`
+	LocalIP      string    `json:"local_ip"`
+	CPU          string    `json:"cpu"`
+	MemMB        int64     `json:"mem_mb"`
+	DiskGB       int64     `json:"disk_gb"`
+	Status       string    `json:"status"`
+	RehldsRunMax int       `json:"rehlds_run_max"`
+	PortRange    string    `json:"rehlds_port_range"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
+	HeartbeatAt  time.Time `json:"heartbeat_at"`
 }
 
-func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
-	rows, err := b.pool.Query(r.Context(), `
+func (b *Backend) handleListAgents(c *gin.Context) {
+	rows, err := b.pool.Query(c.Request.Context(), `
 		SELECT uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
 		       status, rehlds_run_max, rehlds_port_range,
-		       create_time, update_time, heartbeat_time
+		       created_at, updated_at, heartbeat_at
 		FROM manager_agents
-		ORDER BY heartbeat_time DESC
+		ORDER BY heartbeat_at DESC
 	`)
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
 	defer rows.Close()
@@ -608,7 +618,7 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		if err := rows.Scan(&a.UUID, &a.Hostname, &a.PublicIP, &a.LocalIP,
 			&a.CPU, &a.MemMB, &a.DiskGB, &a.Status,
 			&a.RehldsRunMax, &a.PortRange,
-			&a.CreateTime, &a.UpdateTime, &a.HeartbeatTime); err != nil {
+			&a.CreatedAt, &a.UpdatedAt, &a.HeartbeatAt); err != nil {
 			continue
 		}
 		result = append(result, a)
@@ -616,39 +626,41 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 	if result == nil {
 		result = []agentRow{}
 	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	resp.OK(c, result)
 }
 
 // handleAgentContainers 返回指定 agent 最近一次心跳上报的全量容器列表（含 ENV）。
-func (b *Backend) handleAgentContainers(w http.ResponseWriter, r *http.Request) {
-	uuid := r.PathValue("uuid")
+func (b *Backend) handleAgentContainers(c *gin.Context) {
+	uuid := c.Param("uuid")
 	var raw []byte
-	err := b.pool.QueryRow(r.Context(),
+	err := b.pool.QueryRow(c.Request.Context(),
 		`SELECT containers_json FROM manager_agents WHERE uuid=$1`, uuid,
 	).Scan(&raw)
 	if err != nil {
-		http.Error(w, "agent not found", http.StatusNotFound)
+		resp.Fail(c, 404, "agent not found")
 		return
 	}
 	if len(raw) == 0 || string(raw) == "null" {
 		raw = []byte("[]")
 	}
-	w.Header().Set("Content-Type", "application/json")
-	w.Write(raw)
+	var containers any
+	if err := json.Unmarshal(raw, &containers); err != nil {
+		resp.Fail(c, 500, "decode error")
+		return
+	}
+	resp.OK(c, containers)
 }
 
 // handleUpdateAgent 更新 agent 的可配置字段（status/rehlds_run_max/rehlds_port_range）。
-func (b *Backend) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
-	uuid := r.PathValue("uuid")
+func (b *Backend) handleUpdateAgent(c *gin.Context) {
+	uuid := c.Param("uuid")
 	var req struct {
 		Status       *string `json:"status"`
 		RehldsRunMax *int    `json:"rehlds_run_max"`
 		PortRange    *string `json:"rehlds_port_range"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, 400, "invalid json")
 		return
 	}
 
@@ -671,65 +683,64 @@ func (b *Backend) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 		n++
 	}
 	if len(sets) == 0 {
-		http.Error(w, "nothing to update", http.StatusBadRequest)
+		resp.Fail(c, 400, "nothing to update")
 		return
 	}
-	sets = append(sets, "update_time=NOW()")
+	sets = append(sets, "updated_at=NOW()")
 	args = append(args, uuid)
 
 	q := fmt.Sprintf("UPDATE manager_agents SET %s WHERE uuid=$%d", strings.Join(sets, ","), n)
-	if _, err := b.pool.Exec(r.Context(), q, args...); err != nil {
+	if _, err := b.pool.Exec(c.Request.Context(), q, args...); err != nil {
 		slog.Error("update agent failed", "error", err, "uuid", uuid)
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	resp.OK(c, gin.H{"status": "ok"})
 }
 
 type rehldsConfigRow struct {
-	ID         int64     `json:"id"`
-	Image      string    `json:"image"`
-	Version    string    `json:"version"`
-	IsActive   bool      `json:"is_active"`
-	CreateTime time.Time `json:"create_time"`
+	ID        int64     `json:"id"`
+	Image     string    `json:"image"`
+	Version   string    `json:"version"`
+	IsActive  bool      `json:"is_active"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
-func (b *Backend) handleListRehldsConfigs(w http.ResponseWriter, r *http.Request) {
-	rows, err := b.pool.Query(r.Context(),
-		`SELECT id, image, version, is_active, create_time FROM manager_rehlds_configs ORDER BY id DESC`)
+func (b *Backend) handleListRehldsConfigs(c *gin.Context) {
+	rows, err := b.pool.Query(c.Request.Context(),
+		`SELECT id, image, version, is_active, created_at FROM manager_rehlds_configs ORDER BY id DESC`)
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
 	defer rows.Close()
 
 	var result []rehldsConfigRow
 	for rows.Next() {
-		var c rehldsConfigRow
-		if err := rows.Scan(&c.ID, &c.Image, &c.Version, &c.IsActive, &c.CreateTime); err != nil {
+		var cfgRow rehldsConfigRow
+		if err := rows.Scan(&cfgRow.ID, &cfgRow.Image, &cfgRow.Version, &cfgRow.IsActive, &cfgRow.CreatedAt); err != nil {
 			continue
 		}
-		result = append(result, c)
+		result = append(result, cfgRow)
 	}
 	if result == nil {
 		result = []rehldsConfigRow{}
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	resp.OK(c, result)
 }
 
-func (b *Backend) handleCreateRehldsConfig(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) handleCreateRehldsConfig(c *gin.Context) {
 	var req struct {
 		Image    string `json:"image"`
 		Version  string `json:"version"`
 		IsActive bool   `json:"is_active"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Image == "" {
-		http.Error(w, "image is required", http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&req); err != nil || req.Image == "" {
+		resp.Fail(c, 400, "image is required")
 		return
 	}
 
-	ctx := r.Context()
+	ctx := c.Request.Context()
 	if req.IsActive {
 		b.pool.Exec(ctx, `UPDATE manager_rehlds_configs SET is_active=FALSE`)
 	}
@@ -739,26 +750,160 @@ func (b *Backend) handleCreateRehldsConfig(w http.ResponseWriter, r *http.Reques
 		req.Image, req.Version, req.IsActive,
 	).Scan(&id)
 	if err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"id": id})
+	resp.OK(c, gin.H{"id": id})
 }
 
-func (b *Backend) handleActivateRehldsConfig(w http.ResponseWriter, r *http.Request) {
-	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+func (b *Backend) handleActivateRehldsConfig(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
 	if err != nil {
-		http.Error(w, "invalid id", http.StatusBadRequest)
+		resp.Fail(c, 400, "invalid id")
 		return
 	}
-	ctx := r.Context()
+	ctx := c.Request.Context()
 	b.pool.Exec(ctx, `UPDATE manager_rehlds_configs SET is_active=FALSE`)
 	if _, err := b.pool.Exec(ctx, `UPDATE manager_rehlds_configs SET is_active=TRUE WHERE id=$1`, id); err != nil {
-		http.Error(w, "db error", http.StatusInternalServerError)
+		resp.Fail(c, 500, "db error")
 		return
 	}
-	w.WriteHeader(http.StatusOK)
+	resp.OK(c, gin.H{"status": "ok"})
+}
+
+// ── 小程序侧数据只读查看（房间/微信用户/老玩家） ──────────────────────────────
+
+type wxRoomRow struct {
+	ID            string     `json:"id"`
+	Title         string     `json:"title"`
+	CreatorOpenID string     `json:"creator_openid"`
+	CreatorName   string     `json:"creator_name"`
+	JoinerOpenID  string     `json:"joiner_openid"`
+	JoinerName    string     `json:"joiner_name"`
+	Locked        bool       `json:"locked"`
+	Status        string     `json:"status"`
+	CreatedAt     time.Time  `json:"created_at"`
+	DeletedAt     *time.Time `json:"deleted_at,omitempty"`
+}
+
+func (b *Backend) handleListWxRooms(c *gin.Context) {
+	rows, err := b.pool.Query(c.Request.Context(), `
+		SELECT r.id, r.title, r.creator_openid, COALESCE(u.nickname,''),
+		       COALESCE(r.joiner_openid,''), COALESCE(j.nickname,''),
+		       r.password != '' AS locked, r.status, r.created_at, r.deleted_at
+		FROM wx_rooms r
+		JOIN wx_users u ON u.openid = r.creator_openid
+		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
+		ORDER BY r.created_at DESC
+		LIMIT 200
+	`)
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	defer rows.Close()
+
+	var result []wxRoomRow
+	for rows.Next() {
+		var rm wxRoomRow
+		if err := rows.Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
+			&rm.JoinerOpenID, &rm.JoinerName, &rm.Locked, &rm.Status,
+			&rm.CreatedAt, &rm.DeletedAt); err != nil {
+			continue
+		}
+		result = append(result, rm)
+	}
+	if result == nil {
+		result = []wxRoomRow{}
+	}
+	resp.OK(c, result)
+}
+
+type wxUserRow struct {
+	OpenID    string    `json:"openid"`
+	SteamID   string    `json:"steam_id"`
+	Nickname  string    `json:"nickname"`
+	AvatarURL string    `json:"avatar_url"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+func (b *Backend) handleListWxUsers(c *gin.Context) {
+	rows, err := b.pool.Query(c.Request.Context(), `
+		SELECT openid, steam_id, nickname, avatar_url, created_at, updated_at
+		FROM wx_users
+		ORDER BY created_at DESC
+		LIMIT 200
+	`)
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	defer rows.Close()
+
+	var result []wxUserRow
+	for rows.Next() {
+		var u wxUserRow
+		if err := rows.Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt); err != nil {
+			continue
+		}
+		result = append(result, u)
+	}
+	if result == nil {
+		result = []wxUserRow{}
+	}
+	resp.OK(c, result)
+}
+
+type legacyPlayerRow struct {
+	SteamID       string  `json:"steam_id"`
+	Name          string  `json:"name"`
+	Score         float64 `json:"score"`
+	TotalMatch    int     `json:"total_match"`
+	TotalMatchWin int     `json:"total_match_win"`
+	KD            float64 `json:"kd"`
+	WinRate       float64 `json:"win_rate"`
+	Rating        float64 `json:"rating"`
+}
+
+func (b *Backend) handleListLegacyPlayers(c *gin.Context) {
+	keyword := c.Query("keyword")
+	var rows pgx.Rows
+	var err error
+	if keyword != "" {
+		rows, err = b.pool.Query(c.Request.Context(), `
+			SELECT steam_id, name, score, total_match, total_match_win, kd, win_rate, rating
+			FROM legacy_players
+			WHERE name ILIKE '%' || $1 || '%'
+			ORDER BY score DESC
+			LIMIT 200
+		`, keyword)
+	} else {
+		rows, err = b.pool.Query(c.Request.Context(), `
+			SELECT steam_id, name, score, total_match, total_match_win, kd, win_rate, rating
+			FROM legacy_players
+			ORDER BY score DESC
+			LIMIT 200
+		`)
+	}
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	defer rows.Close()
+
+	var result []legacyPlayerRow
+	for rows.Next() {
+		var p legacyPlayerRow
+		if err := rows.Scan(&p.SteamID, &p.Name, &p.Score, &p.TotalMatch, &p.TotalMatchWin, &p.KD, &p.WinRate, &p.Rating); err != nil {
+			continue
+		}
+		result = append(result, p)
+	}
+	if result == nil {
+		result = []legacyPlayerRow{}
+	}
+	resp.OK(c, result)
 }
 
 // staticHandler 服务嵌入的前端静态文件，未匹配的路径返回 index.html（SPA路由）。
@@ -786,31 +931,31 @@ func (b *Backend) staticHandler() http.Handler {
 }
 
 type serverQueryResponse struct {
-	Info    *a2s.ServerInfo  `json:"info"`
-	Players *a2s.PlayerInfo  `json:"players"`
-	Rules   *a2s.RulesInfo   `json:"rules"`
-	InfoErr string           `json:"info_error,omitempty"`
-	PlrErr  string           `json:"players_error,omitempty"`
-	RuleErr string           `json:"rules_error,omitempty"`
+	Info    *a2s.ServerInfo `json:"info"`
+	Players *a2s.PlayerInfo `json:"players"`
+	Rules   *a2s.RulesInfo  `json:"rules"`
+	InfoErr string          `json:"info_error,omitempty"`
+	PlrErr  string          `json:"players_error,omitempty"`
+	RuleErr string          `json:"rules_error,omitempty"`
 }
 
-func (b *Backend) handleMatchServer(w http.ResponseWriter, r *http.Request) {
-	matchID := r.PathValue("id")
+func (b *Backend) handleMatchServer(c *gin.Context) {
+	matchID := c.Param("id")
 	var publicIP string
 	var port int
-	err := b.pool.QueryRow(r.Context(), `
+	err := b.pool.QueryRow(c.Request.Context(), `
 		SELECT a.public_ip, m.port
 		FROM manager_matches m
 		JOIN manager_agents a ON a.uuid = m.agent_uuid
 		WHERE m.match_id = $1
 	`, matchID).Scan(&publicIP, &port)
 	if err != nil {
-		http.Error(w, "match not found", http.StatusNotFound)
+		resp.Fail(c, 404, "match not found")
 		return
 	}
 
 	addr := fmt.Sprintf("%s:%d", publicIP, port)
-	resp := serverQueryResponse{}
+	out := serverQueryResponse{}
 
 	type result[T any] struct {
 		val *T
@@ -875,23 +1020,22 @@ func (b *Backend) handleMatchServer(w http.ResponseWriter, r *http.Request) {
 	go query(func(c *a2s.Client) (any, error) { return c.QueryRules() }, ruleCh)
 
 	if r := <-infoCh; r.err != nil {
-		resp.InfoErr = r.err.Error()
+		out.InfoErr = r.err.Error()
 	} else {
-		resp.Info = r.val
+		out.Info = r.val
 	}
 	if r := <-plrCh; r.err != nil {
-		resp.PlrErr = r.err.Error()
+		out.PlrErr = r.err.Error()
 	} else {
-		resp.Players = r.val
+		out.Players = r.val
 	}
 	if r := <-ruleCh; r.err != nil {
-		resp.RuleErr = r.err.Error()
+		out.RuleErr = r.err.Error()
 	} else {
-		resp.Rules = r.val
+		out.Rules = r.val
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	resp.OK(c, out)
 }
 
 func generateMatchID() (string, error) {
@@ -907,64 +1051,58 @@ func generateMatchID() (string, error) {
 const sessionCookie = "mr1v1_session"
 
 // authMiddleware 验证 Cookie session 或 X-API-Key header；ADMIN_PASS 未配置时直接放行。
-func (b *Backend) authMiddleware(apiPrefix string, next http.Handler) http.Handler {
+func (b *Backend) authMiddleware(apiPrefix string) gin.HandlerFunc {
 	if b.cfg.AdminPass == "" {
 		slog.Warn("ADMIN_PASS not set, manager UI auth disabled")
-		return next
+		return func(c *gin.Context) {}
 	}
 	exempt := map[string]bool{
 		apiPrefix + "/auth/login":  true,
 		apiPrefix + "/auth/logout": true,
 		apiPrefix + "/healthz":     true,
 	}
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if exempt[r.URL.Path] {
-			next.ServeHTTP(w, r)
+	return func(c *gin.Context) {
+		path := c.Request.URL.Path
+		if exempt[path] {
 			return
 		}
 		// 内部服务调用：X-API-Key 校验
-		if b.cfg.InternalAPIKey != "" && r.Header.Get("X-API-Key") == b.cfg.InternalAPIKey {
-			next.ServeHTTP(w, r)
+		if b.cfg.InternalAPIKey != "" && c.GetHeader("X-API-Key") == b.cfg.InternalAPIKey {
 			return
 		}
 		// 浏览器会话：Cookie 校验
-		if cookie, err := r.Cookie(sessionCookie); err == nil {
+		if cookie, err := c.Cookie(sessionCookie); err == nil {
 			b.sessionsMu.RLock()
-			_, ok := b.sessions[cookie.Value]
+			_, ok := b.sessions[cookie]
 			b.sessionsMu.RUnlock()
 			if ok {
-				next.ServeHTTP(w, r)
 				return
 			}
 		}
-		if strings.HasPrefix(r.URL.Path, "/api/") {
-			w.Header().Set("Content-Type", "application/json")
-			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+		if strings.HasPrefix(path, "/api/") {
+			resp.Fail(c, 401, "unauthorized")
 			return
 		}
 		// 静态资源直接放行（JS/CSS/图标等，浏览器加载登录页时需要）
-		if strings.HasPrefix(r.URL.Path, "/assets/") || strings.ContainsRune(r.URL.Path[1:], '.') {
-			next.ServeHTTP(w, r)
+		if strings.HasPrefix(path, "/assets/") || strings.ContainsRune(path[1:], '.') {
 			return
 		}
 		// SPA 页面请求：返回 index.html，React 负责跳转 /login
-		r.URL.Path = "/"
-		next.ServeHTTP(w, r)
-	})
+		c.Request.URL.Path = "/"
+	}
 }
 
-func (b *Backend) handleLogin(w http.ResponseWriter, r *http.Request) {
+func (b *Backend) handleLogin(c *gin.Context) {
 	var req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, 400, "bad request")
 		return
 	}
 	if req.Username != b.cfg.AdminUser || req.Password != b.cfg.AdminPass {
-		w.Header().Set("Content-Type", "application/json")
-		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		resp.Fail(c, 401, "invalid credentials")
 		return
 	}
 	tokenBytes := make([]byte, 16)
@@ -975,31 +1113,18 @@ func (b *Backend) handleLogin(w http.ResponseWriter, r *http.Request) {
 	b.sessions[token] = req.Username
 	b.sessionsMu.Unlock()
 
-	http.SetCookie(w, &http.Cookie{
-		Name:     sessionCookie,
-		Value:    token,
-		Path:     "/",
-		HttpOnly: true,
-		SameSite: http.SameSiteLaxMode,
-		MaxAge:   86400 * 7,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(sessionCookie, token, 86400*7, "/", "", false, true)
+	resp.OK(c, gin.H{"status": "ok"})
 }
 
-func (b *Backend) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if cookie, err := r.Cookie(sessionCookie); err == nil {
+func (b *Backend) handleLogout(c *gin.Context) {
+	if cookie, err := c.Cookie(sessionCookie); err == nil {
 		b.sessionsMu.Lock()
-		delete(b.sessions, cookie.Value)
+		delete(b.sessions, cookie)
 		b.sessionsMu.Unlock()
 	}
-	http.SetCookie(w, &http.Cookie{
-		Name:   sessionCookie,
-		Value:  "",
-		Path:   "/",
-		MaxAge: -1,
-	})
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+	c.SetSameSite(http.SameSiteLaxMode)
+	c.SetCookie(sessionCookie, "", -1, "/", "", false, true)
+	resp.OK(c, gin.H{"status": "ok"})
 }
-

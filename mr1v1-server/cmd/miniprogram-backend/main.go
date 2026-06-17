@@ -3,8 +3,8 @@ package main
 import (
 	"context"
 	"log/slog"
-	"net/http"
 
+	"github.com/gin-gonic/gin"
 	wxconfig "mr1v1-server/internal/wxserver/config"
 	"mr1v1-server/internal/wxserver/handlers"
 	"mr1v1-server/internal/wxserver/matchmaker"
@@ -34,23 +34,30 @@ func main() {
 	mm := matchmaker.New(cfg.BackendURL, cfg.InternalAPIKey)
 	mgr := room.NewManager(cfg.BackendURL, cfg.InternalAPIKey, s)
 
-	const (
-		apiPrefix = "/api/wx"
-		wsPrefix  = "/ws/wx"
-	)
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(handlers.CORS())
 
-	mux := http.NewServeMux()
-	mux.HandleFunc(apiPrefix+"/login", handlers.LoginHandler(cfg, s))
-	mux.HandleFunc(apiPrefix+"/user", handlers.UserHandler(s))
-	mux.HandleFunc(apiPrefix+"/rooms", handlers.RoomsHandler(s, mgr))
-	mux.HandleFunc(apiPrefix+"/rooms/", handlers.RoomActionHandler(s, apiPrefix))
-	mux.HandleFunc(wsPrefix+"/room/", handlers.RoomWSHandler(s, mgr, wsPrefix))
-	mux.HandleFunc(wsPrefix+"/matchmaking", handlers.MatchmakingHandler(mm, s))
-	mux.HandleFunc(apiPrefix+"/legacy-players/search", handlers.SearchLegacyPlayersHandler(s))
-	mux.HandleFunc(apiPrefix+"/legacy-players/bind", handlers.BindLegacyPlayerHandler(s))
+	wx := r.Group("/api/wx")
+	wx.POST("/login", handlers.Login(cfg, s))
+	wx.GET("/legacy-players/search", handlers.SearchLegacyPlayers(s))
+
+	auth := wx.Group("", handlers.Auth(s))
+	auth.GET("/user", handlers.GetUser(s))
+	auth.POST("/user", handlers.UpdateSteamID(s))
+	auth.PATCH("/user", handlers.UpdateProfile(s))
+	auth.GET("/rooms", handlers.ListRooms(s))
+	auth.POST("/rooms", handlers.CreateRoom(s))
+	auth.POST("/rooms/:id/join", handlers.JoinRoom(s))
+	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s))
+	auth.POST("/legacy-players/bind", handlers.BindLegacyPlayer(s))
+
+	ws := r.Group("/ws/wx")
+	ws.GET("/room/:id", handlers.RoomWS(s, mgr))
+	ws.GET("/matchmaking", handlers.Matchmaking(mm, s))
 
 	slog.Info("mr1v1-wx listening", "addr", ":"+cfg.Port, "backend", cfg.BackendURL)
-	if err := http.ListenAndServe(":"+cfg.Port, mux); err != nil {
+	if err := r.Run(":" + cfg.Port); err != nil {
 		slog.Error("server stopped", "error", err)
 	}
 }

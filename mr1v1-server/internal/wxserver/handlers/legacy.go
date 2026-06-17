@@ -1,78 +1,43 @@
 package handlers
 
 import (
-	"encoding/json"
-	"net/http"
-
+	"github.com/gin-gonic/gin"
+	"mr1v1-server/internal/resp"
 	"mr1v1-server/internal/wxserver/store"
 )
 
-func SearchLegacyPlayersHandler(s *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodGet {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		keyword := r.URL.Query().Get("keyword")
+func SearchLegacyPlayers(s *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		keyword := c.Query("keyword")
 		if keyword == "" {
-			http.Error(w, "keyword required", http.StatusBadRequest)
+			resp.Fail(c, 400, "keyword required")
 			return
 		}
-
-		players, err := s.SearchLegacyPlayers(r.Context(), keyword)
+		players, err := s.SearchLegacyPlayers(c.Request.Context(), keyword)
 		if err != nil {
-			http.Error(w, "search failed", http.StatusInternalServerError)
+			resp.Fail(c, 500, "search failed")
 			return
 		}
 		if players == nil {
 			players = []store.LegacyPlayer{}
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(players)
+		resp.OK(c, players)
 	}
 }
 
-func BindLegacyPlayerHandler(s *store.Store) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		if r.Method == http.MethodOptions {
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		if r.Method != http.MethodPost {
-			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-			return
-		}
-
-		token := r.Header.Get("Authorization")
-		openid, ok := s.GetOpenIDByToken(r.Context(), token)
-		if !ok {
-			http.Error(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-
+func BindLegacyPlayer(s *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
 		var req struct {
-			SteamID string `json:"steam_id"`
+			SteamID string `json:"steam_id" binding:"required"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.SteamID == "" {
-			http.Error(w, "bad request", http.StatusBadRequest)
+		if err := c.ShouldBindJSON(&req); err != nil {
+			resp.Fail(c, 400, "steam_id required")
 			return
 		}
-
-		if err := s.UpdateSteamID(r.Context(), openid, req.SteamID); err != nil {
-			http.Error(w, "db error", http.StatusInternalServerError)
+		if err := s.UpdateSteamID(c.Request.Context(), openid(c), req.SteamID); err != nil {
+			resp.Fail(c, 500, "db error")
 			return
 		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"steam_id": req.SteamID})
+		resp.OK(c, gin.H{"steam_id": req.SteamID})
 	}
 }
