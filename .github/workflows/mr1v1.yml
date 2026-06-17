@@ -12,9 +12,9 @@ on:
 env:
   REGISTRY: registry.cn-beijing.aliyuncs.com
   CONSUMER_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer
-  BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend
+  MANAGER_BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend
   AGENT_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent
-  WX_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend
+  MINIPROGRAM_BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend
 
 jobs:
   warm-cache:
@@ -98,7 +98,7 @@ jobs:
           push: true
           tags: ${{ env.CONSUMER_IMAGE }}:${{ steps.meta.outputs.version }}
 
-  build-backend:
+  build-manager-backend:
     if: startsWith(github.ref, 'refs/tags/mr1v1-manager-backend-v')
     runs-on: ubuntu-latest
     steps:
@@ -164,7 +164,7 @@ jobs:
           context: mr1v1-server
           file: mr1v1-server/dockerfile/Dockerfile-manager-backend
           push: true
-          tags: ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
+          tags: ${{ env.MANAGER_BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
 
   build-agent:
     if: startsWith(github.ref, 'refs/tags/mr1v1-agent-v')
@@ -221,7 +221,7 @@ jobs:
           push: true
           tags: ${{ env.AGENT_IMAGE }}:${{ steps.meta.outputs.version }}
 
-  build-wx:
+  build-miniprogram-backend:
     if: startsWith(github.ref, 'refs/tags/mr1v1-miniprogram-backend-v')
     runs-on: ubuntu-latest
     steps:
@@ -274,4 +274,4 @@ jobs:
           context: mr1v1-server
           file: mr1v1-server/dockerfile/Dockerfile-miniprogram-backend
           push: true
-          tags: ${{ env.WX_IMAGE }}:${{ steps.meta.outputs.version }}
+          tags: ${{ env.MINIPROGRAM_BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
