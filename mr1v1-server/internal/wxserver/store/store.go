@@ -2,6 +2,7 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -12,6 +13,7 @@ type User struct {
 	SteamID   string
 	Nickname  string
 	AvatarURL string
+	CreatedAt time.Time
 }
 
 type LegacyPlayer struct {
@@ -90,8 +92,8 @@ func (s *Store) UpsertUser(ctx context.Context, openid string) error {
 func (s *Store) GetUser(ctx context.Context, openid string) (*User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
-		SELECT openid, steam_id, nickname, avatar_url FROM wx_users WHERE openid = $1
-	`, openid).Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL)
+		SELECT openid, steam_id, nickname, avatar_url, created_at FROM wx_users WHERE openid = $1
+	`, openid).Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL, &u.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}

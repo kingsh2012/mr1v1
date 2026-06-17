@@ -31,11 +31,12 @@ func UserHandler(s *store.Store) http.HandlerFunc {
 				http.Error(w, "db error", http.StatusInternalServerError)
 				return
 			}
-			var steamID, avatarURL, nickname string
+			var steamID, avatarURL, nickname, createdAt string
 			if u != nil {
 				steamID = u.SteamID
 				avatarURL = u.AvatarURL
 				nickname = u.Nickname
+				createdAt = u.CreatedAt.Format("2006-01-02T15:04:05Z")
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
@@ -43,6 +44,7 @@ func UserHandler(s *store.Store) http.HandlerFunc {
 				"steam_id":   steamID,
 				"avatar_url": avatarURL,
 				"nickname":   nickname,
+				"created_at": createdAt,
 			})
 
 		case http.MethodPost:
