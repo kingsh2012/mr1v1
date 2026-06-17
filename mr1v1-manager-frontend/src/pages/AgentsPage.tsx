@@ -28,9 +28,9 @@ interface Agent {
   rehlds_run_max: number
   rehlds_port_range: string
   running_containers: string
-  create_time: string
-  update_time: string
-  heartbeat_time: string
+  created_at: string
+  updated_at: string
+  heartbeat_at: string
 }
 
 interface ContainerDetail {
@@ -303,8 +303,8 @@ export default function AgentsPage() {
       key: 'online',
       width: 70,
       render: (_: unknown, r: Agent) => (
-        <Tag color={isOnline(r.heartbeat_time) ? 'green' : 'default'}>
-          {isOnline(r.heartbeat_time) ? '在线' : '离线'}
+        <Tag color={isOnline(r.heartbeat_at) ? 'green' : 'default'}>
+          {isOnline(r.heartbeat_at) ? '在线' : '离线'}
         </Tag>
       ),
     },
@@ -337,20 +337,20 @@ export default function AgentsPage() {
     },
     {
       title: '创建时间',
-      dataIndex: 'create_time',
-      key: 'create_time',
+      dataIndex: 'created_at',
+      key: 'created_at',
       render: (v: string) => dayjs(v).format(FMT),
     },
     {
       title: '更新时间',
-      dataIndex: 'update_time',
-      key: 'update_time',
+      dataIndex: 'updated_at',
+      key: 'updated_at',
       render: (v: string) => dayjs(v).format(FMT),
     },
     {
       title: '心跳时间',
-      dataIndex: 'heartbeat_time',
-      key: 'heartbeat_time',
+      dataIndex: 'heartbeat_at',
+      key: 'heartbeat_at',
       render: (v: string) => (
         <Text type="secondary" title={dayjs(v).format(FMT)}>{dayjs(v).fromNow()}</Text>
       ),

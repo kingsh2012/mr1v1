@@ -122,7 +122,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if _, err := c.pool.Exec(ctx,
-			`UPDATE manager_matches SET state='playing', update_time=NOW()
+			`UPDATE manager_matches SET state='playing', updated_at=NOW()
 			 WHERE match_id=$1 AND state IN ('creating','waiting')`,
 			d.MatchID,
 		); err != nil {
@@ -170,7 +170,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if _, err := c.pool.Exec(ctx,
-			`UPDATE manager_matches SET state='finished', update_time=NOW()
+			`UPDATE manager_matches SET state='finished', updated_at=NOW()
 			 WHERE match_id=$1 AND state != 'finished'`,
 			d.MatchID,
 		); err != nil {
@@ -272,12 +272,12 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 		INSERT INTO manager_agents
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
 			 status, rehlds_run_max, rehlds_port_range, containers_json,
-			 create_time, update_time, heartbeat_time)
+			 created_at, updated_at, heartbeat_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', $9, NOW(), NOW(), NOW())
 		ON CONFLICT (uuid) DO UPDATE SET
-			heartbeat_time  = NOW(),
+			heartbeat_at    = NOW(),
 			containers_json = EXCLUDED.containers_json,
-			update_time = CASE
+			updated_at = CASE
 				WHEN manager_agents.hostname  != EXCLUDED.hostname
 				  OR manager_agents.public_ip != EXCLUDED.public_ip
 				  OR manager_agents.local_ip  != EXCLUDED.local_ip
@@ -285,7 +285,7 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 				  OR manager_agents.mem_mb    != EXCLUDED.mem_mb
 				  OR manager_agents.disk_gb   != EXCLUDED.disk_gb
 				THEN NOW()
-				ELSE manager_agents.update_time
+				ELSE manager_agents.updated_at
 			END,
 			hostname  = EXCLUDED.hostname,
 			public_ip = EXCLUDED.public_ip,

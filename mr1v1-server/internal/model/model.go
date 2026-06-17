@@ -18,17 +18,38 @@ var BackendStatements = []string{
 		rehlds_run_max     INT          NOT NULL DEFAULT 0,
 		rehlds_port_range  VARCHAR(32)  NOT NULL DEFAULT '',
 		containers_json    JSONB        NOT NULL DEFAULT '[]',
-		create_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-		update_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-		heartbeat_time     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+		created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+		updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+		heartbeat_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
+	// 旧列名迁移
+	`DO $$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_agents' AND column_name='create_time') THEN
+			ALTER TABLE manager_agents RENAME COLUMN create_time TO created_at;
+		END IF;
+	END $$`,
+	`DO $$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_agents' AND column_name='update_time') THEN
+			ALTER TABLE manager_agents RENAME COLUMN update_time TO updated_at;
+		END IF;
+	END $$`,
+	`DO $$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_agents' AND column_name='heartbeat_time') THEN
+			ALTER TABLE manager_agents RENAME COLUMN heartbeat_time TO heartbeat_at;
+		END IF;
+	END $$`,
 	`CREATE TABLE IF NOT EXISTS manager_rehlds_configs (
 		id          BIGSERIAL    PRIMARY KEY,
 		image       VARCHAR(256) NOT NULL,
 		version     VARCHAR(64)  NOT NULL DEFAULT '',
 		is_active   BOOLEAN      NOT NULL DEFAULT FALSE,
-		create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+		created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
+	`DO $$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_rehlds_configs' AND column_name='create_time') THEN
+			ALTER TABLE manager_rehlds_configs RENAME COLUMN create_time TO created_at;
+		END IF;
+	END $$`,
 	`DROP TABLE IF EXISTS mr1v1_match_status`,
 	`CREATE TABLE IF NOT EXISTS manager_matches (
 		match_id    VARCHAR(64)  PRIMARY KEY,
@@ -39,9 +60,19 @@ var BackendStatements = []string{
 		port        INT          NOT NULL DEFAULT 0,
 		image       VARCHAR(256) NOT NULL DEFAULT '',
 		state       VARCHAR(16)  NOT NULL DEFAULT 'creating',
-		create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
-		update_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
+		created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+		updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
+	`DO $$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_matches' AND column_name='create_time') THEN
+			ALTER TABLE manager_matches RENAME COLUMN create_time TO created_at;
+		END IF;
+	END $$`,
+	`DO $$ BEGIN
+		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_matches' AND column_name='update_time') THEN
+			ALTER TABLE manager_matches RENAME COLUMN update_time TO updated_at;
+		END IF;
+	END $$`,
 	`CREATE INDEX IF NOT EXISTS idx_manager_matches_agent ON manager_matches(agent_uuid, state)`,
 	`CREATE INDEX IF NOT EXISTS idx_manager_matches_state ON manager_matches(state)`,
 	`CREATE TABLE IF NOT EXISTS manager_operation_logs (

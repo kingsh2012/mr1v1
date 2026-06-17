@@ -12,7 +12,7 @@ interface RehldsConfig {
   image: string
   version: string
   is_active: boolean
-  create_time: string
+  created_at: string
 }
 
 export default function RehldsConfigPage() {
@@ -60,8 +60,8 @@ export default function RehldsConfigPage() {
     },
     {
       title: '创建时间',
-      dataIndex: 'create_time',
-      key: 'create_time',
+      dataIndex: 'created_at',
+      key: 'created_at',
       render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm:ss'),
     },
     {

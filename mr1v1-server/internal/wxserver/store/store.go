@@ -57,8 +57,10 @@ func (s *Store) Migrate(ctx context.Context) error {
 			status          TEXT NOT NULL DEFAULT 'waiting',
 			server_addr     TEXT NOT NULL DEFAULT '',
 			match_id        TEXT NOT NULL DEFAULT '',
-			created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+			created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+			deleted_at      TIMESTAMPTZ
 		);
+		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 	`)
 	return err
 }
@@ -132,7 +134,7 @@ type Room struct {
 func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {
 	var count int
 	err := s.pool.QueryRow(ctx, `
-		SELECT COUNT(*) FROM wx_rooms WHERE creator_openid = $1 AND status IN ('waiting','ready')
+		SELECT COUNT(*) FROM wx_rooms WHERE creator_openid = $1 AND status IN ('waiting','ready') AND deleted_at IS NULL
 	`, openid).Scan(&count)
 	return count > 0, err
 }
@@ -155,7 +157,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
-		WHERE r.status IN ('waiting','ready')
+		WHERE r.status IN ('waiting','ready') AND r.deleted_at IS NULL
 		ORDER BY r.created_at DESC
 		LIMIT 50
 	`)
@@ -188,7 +190,7 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
-		WHERE r.id = $1
+		WHERE r.id = $1 AND r.deleted_at IS NULL
 	`, id).Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
 		&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
 		&password, &rm.Status)
@@ -204,7 +206,7 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 
 func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) {
 	var pw string
-	err := s.pool.QueryRow(ctx, `SELECT password FROM wx_rooms WHERE id = $1`, id).Scan(&pw)
+	err := s.pool.QueryRow(ctx, `SELECT password FROM wx_rooms WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&pw)
 	if err == pgx.ErrNoRows {
 		return "", nil
 	}
@@ -214,7 +216,7 @@ func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) 
 func (s *Store) JoinRoom(ctx context.Context, id, joinerOpenID string) error {
 	_, err := s.pool.Exec(ctx, `
 		UPDATE wx_rooms SET joiner_openid = $2, status = 'ready'
-		WHERE id = $1 AND joiner_openid IS NULL AND status = 'waiting'
+		WHERE id = $1 AND joiner_openid IS NULL AND status = 'waiting' AND deleted_at IS NULL
 	`, id, joinerOpenID)
 	return err
 }
@@ -225,9 +227,9 @@ func (s *Store) LeaveRoom(ctx context.Context, id, openid string) error {
 		DO $$
 		DECLARE r wx_rooms%ROWTYPE;
 		BEGIN
-			SELECT * INTO r FROM wx_rooms WHERE id = $1;
+			SELECT * INTO r FROM wx_rooms WHERE id = $1 AND deleted_at IS NULL;
 			IF r.creator_openid = $2 THEN
-				DELETE FROM wx_rooms WHERE id = $1;
+				UPDATE wx_rooms SET deleted_at = now() WHERE id = $1;
 			ELSIF r.joiner_openid = $2 THEN
 				UPDATE wx_rooms SET joiner_openid = NULL, status = 'waiting' WHERE id = $1;
 			END IF;
@@ -238,13 +240,13 @@ func (s *Store) LeaveRoom(ctx context.Context, id, openid string) error {
 
 func (s *Store) SetRoomMatched(ctx context.Context, id, matchID, serverAddr string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE wx_rooms SET status='matched', match_id=$2, server_addr=$3 WHERE id=$1
+		UPDATE wx_rooms SET status='matched', match_id=$2, server_addr=$3 WHERE id=$1 AND deleted_at IS NULL
 	`, id, matchID, serverAddr)
 	return err
 }
 
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM wx_rooms WHERE id = $1`, id)
+	_, err := s.pool.Exec(ctx, `UPDATE wx_rooms SET deleted_at = now() WHERE id = $1`, id)
 	return err
 }
 
