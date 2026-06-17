@@ -189,7 +189,7 @@ func (h *Hub) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr stri
 		"p1_steamid": p1SteamID,
 	})
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(h.backendURL+"/api/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
+	resp, err := client.Post(h.backendURL+"/api/manager/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
 	if err != nil {
 		return "", "", fmt.Errorf("call backend: %w", err)
 	}

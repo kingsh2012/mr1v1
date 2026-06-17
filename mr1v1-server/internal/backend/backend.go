@@ -147,26 +147,26 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 	}
 }
 
-// Handler 返回HTTP API路由。
-func (b *Backend) Handler() http.Handler {
+// Handler 返回HTTP API路由，prefix 为路由前缀（如 "/api/manager"）。
+func (b *Backend) Handler(prefix string) http.Handler {
 	mux := http.NewServeMux()
 	// 比赛
-	mux.HandleFunc("POST /api/matches", b.handleCreateMatch)
-	mux.HandleFunc("GET /api/matches", b.handleListMatches)
-	mux.HandleFunc("GET /api/matches/{id}/logs", b.handleMatchLogs)
-	mux.HandleFunc("GET /api/matches/{id}/server", b.handleMatchServer)
-	mux.HandleFunc("POST /api/matches/{id}/end", b.handleEndMatch)
-	mux.HandleFunc("POST /api/matches/{id}/destroy", b.handleDestroyMatch)
+	mux.HandleFunc("POST "+prefix+"/matches", b.handleCreateMatch)
+	mux.HandleFunc("GET "+prefix+"/matches", b.handleListMatches)
+	mux.HandleFunc("GET "+prefix+"/matches/{id}/logs", b.handleMatchLogs)
+	mux.HandleFunc("GET "+prefix+"/matches/{id}/server", b.handleMatchServer)
+	mux.HandleFunc("POST "+prefix+"/matches/{id}/end", b.handleEndMatch)
+	mux.HandleFunc("POST "+prefix+"/matches/{id}/destroy", b.handleDestroyMatch)
 	// Agent 管理
-	mux.HandleFunc("GET /api/agents", b.handleListAgents)
-	mux.HandleFunc("PATCH /api/agents/{uuid}", b.handleUpdateAgent)
-	mux.HandleFunc("GET /api/agents/{uuid}/containers", b.handleAgentContainers)
+	mux.HandleFunc("GET "+prefix+"/agents", b.handleListAgents)
+	mux.HandleFunc("PATCH "+prefix+"/agents/{uuid}", b.handleUpdateAgent)
+	mux.HandleFunc("GET "+prefix+"/agents/{uuid}/containers", b.handleAgentContainers)
 	// Rehlds 镜像配置
-	mux.HandleFunc("GET /api/rehlds-configs", b.handleListRehldsConfigs)
-	mux.HandleFunc("POST /api/rehlds-configs", b.handleCreateRehldsConfig)
-	mux.HandleFunc("PATCH /api/rehlds-configs/{id}/activate", b.handleActivateRehldsConfig)
+	mux.HandleFunc("GET "+prefix+"/rehlds-configs", b.handleListRehldsConfigs)
+	mux.HandleFunc("POST "+prefix+"/rehlds-configs", b.handleCreateRehldsConfig)
+	mux.HandleFunc("PATCH "+prefix+"/rehlds-configs/{id}/activate", b.handleActivateRehldsConfig)
 	// 健康检查 & 静态文件
-	mux.HandleFunc("GET /api/healthz", b.handleHealthz)
+	mux.HandleFunc("GET "+prefix+"/healthz", b.handleHealthz)
 	mux.Handle("/", b.staticHandler())
 	return mux
 }

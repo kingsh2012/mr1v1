@@ -20,7 +20,7 @@ func main() {
 	defer b.Close()
 
 	slog.Info("backend listening", "addr", cfg.HTTP.Listen)
-	if err := http.ListenAndServe(cfg.HTTP.Listen, b.Handler()); err != nil {
+	if err := http.ListenAndServe(cfg.HTTP.Listen, b.Handler("/api/manager")); err != nil {
 		slog.Error("http server stopped", "error", err)
 		os.Exit(1)
 	}

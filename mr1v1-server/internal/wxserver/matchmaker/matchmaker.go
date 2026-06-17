@@ -94,7 +94,7 @@ func (m *Matchmaker) createMatch(p0SteamID, p1SteamID string) (matchID, serverAd
 		"p0_steamid": p0SteamID,
 		"p1_steamid": p1SteamID,
 	})
-	resp, err := http.Post(m.backendURL+"/api/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
+	resp, err := http.Post(m.backendURL+"/api/manager/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
 	if err != nil {
 		return "", "", fmt.Errorf("call backend: %w", err)
 	}

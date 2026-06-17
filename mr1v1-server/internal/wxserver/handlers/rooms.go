@@ -76,8 +76,8 @@ func createRoom(w http.ResponseWriter, r *http.Request, s *store.Store) {
 	json.NewEncoder(w).Encode(rm)
 }
 
-// RoomActionHandler handles POST /api/rooms/{id}/join and DELETE /api/rooms/{id}
-func RoomActionHandler(s *store.Store) http.HandlerFunc {
+// RoomActionHandler handles POST {apiPrefix}/rooms/{id}/join and DELETE {apiPrefix}/rooms/{id}
+func RoomActionHandler(s *store.Store, apiPrefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if r.Method == http.MethodOptions {
@@ -93,8 +93,8 @@ func RoomActionHandler(s *store.Store) http.HandlerFunc {
 			return
 		}
 
-		// extract room id and action from path: /api/rooms/{id}/join or /api/rooms/{id}
-		path := strings.TrimPrefix(r.URL.Path, "/api/rooms/")
+		// extract room id and action from path: {apiPrefix}/rooms/{id}/join or {apiPrefix}/rooms/{id}
+		path := strings.TrimPrefix(r.URL.Path, apiPrefix+"/rooms/")
 		parts := strings.SplitN(path, "/", 2)
 		roomID := parts[0]
 		action := ""
@@ -149,8 +149,8 @@ func leaveRoom(w http.ResponseWriter, r *http.Request, s *store.Store, roomID, o
 	w.WriteHeader(http.StatusNoContent)
 }
 
-// RoomWSHandler handles WS /ws/room/{id}?token=xxx
-func RoomWSHandler(s *store.Store, mgr *room.Manager) http.HandlerFunc {
+// RoomWSHandler handles WS {wsPrefix}/room/{id}?token=xxx
+func RoomWSHandler(s *store.Store, mgr *room.Manager, wsPrefix string) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := r.URL.Query().Get("token")
 		openid, ok := s.GetOpenIDByToken(r.Context(), token)
@@ -159,7 +159,7 @@ func RoomWSHandler(s *store.Store, mgr *room.Manager) http.HandlerFunc {
 			return
 		}
 
-		roomID := strings.TrimPrefix(r.URL.Path, "/ws/room/")
+		roomID := strings.TrimPrefix(r.URL.Path, wsPrefix+"/room/")
 
 		rm, err := s.GetRoom(r.Context(), roomID)
 		if err != nil || rm == nil {
