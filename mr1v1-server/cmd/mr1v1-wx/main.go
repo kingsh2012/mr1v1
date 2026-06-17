@@ -33,8 +33,8 @@ func main() {
 	}
 	slog.Info("store connected and migrated")
 
-	mm := matchmaker.New(cfg.BackendURL)
-	mgr := room.NewManager(cfg.BackendURL, s)
+	mm := matchmaker.New(cfg.BackendURL, cfg.InternalAPIKey)
+	mgr := room.NewManager(cfg.BackendURL, cfg.InternalAPIKey, s)
 
 	const (
 		apiPrefix = "/api/wx"

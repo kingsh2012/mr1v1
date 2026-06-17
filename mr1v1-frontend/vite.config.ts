@@ -5,11 +5,11 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      '/api': 'http://localhost:8181',
+      '/api/manager': 'http://localhost:8181',
     },
   },
   build: {
-    outDir: '../mr1v1-collector/internal/backend/static',
+    outDir: '../mr1v1-server/internal/backend/static',
     emptyOutDir: true,
   },
 })

@@ -4,7 +4,7 @@ import {
 } from 'antd'
 
 import { PlusOutlined, CheckCircleOutlined } from '@ant-design/icons'
-import axios from 'axios'
+import api from '../api'
 import dayjs from 'dayjs'
 
 interface RehldsConfig {
@@ -24,7 +24,7 @@ export default function RehldsConfigPage() {
   const fetchConfigs = async () => {
     setLoading(true)
     try {
-      const res = await axios.get<RehldsConfig[]>('/api/rehlds-configs')
+      const res = await api.get<RehldsConfig[]>('/rehlds-configs')
       setConfigs(res.data ?? [])
     } finally {
       setLoading(false)
@@ -35,7 +35,7 @@ export default function RehldsConfigPage() {
 
   const handleAdd = async () => {
     const values = await form.validateFields()
-    await axios.post('/api/rehlds-configs', values)
+    await api.post('/rehlds-configs', values)
     message.success('添加成功')
     setAddOpen(false)
     form.resetFields()
@@ -43,7 +43,7 @@ export default function RehldsConfigPage() {
   }
 
   const handleActivate = async (id: number) => {
-    await axios.patch(`/api/rehlds-configs/${id}/activate`)
+    await api.patch(`/rehlds-configs/${id}/activate`)
     message.success('已激活')
     fetchConfigs()
   }

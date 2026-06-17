@@ -4,7 +4,7 @@ import {
   Typography, Alert, Spin, Descriptions,
 } from 'antd'
 import { EditOutlined } from '@ant-design/icons'
-import axios from 'axios'
+import api from '../api'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 import 'dayjs/locale/zh-cn'
@@ -54,7 +54,7 @@ function ContainerExpand({ agentUUID }: { agentUUID: string }) {
     if (fetched.current) return
     fetched.current = true
     setLoading(true)
-    axios.get<ContainerDetail[]>(`/api/agents/${agentUUID}/containers`)
+    api.get<ContainerDetail[]>(`/agents/${agentUUID}/containers`)
       .then(r => setContainers(r.data ?? []))
       .catch(() => setContainers([]))
       .finally(() => setLoading(false))
@@ -229,7 +229,7 @@ export default function AgentsPage() {
   const fetchAgents = async () => {
     setLoading(true)
     try {
-      const res = await axios.get<Agent[]>('/api/agents')
+      const res = await api.get<Agent[]>('/agents')
       setAgents(res.data ?? [])
     } finally {
       setLoading(false)
@@ -287,7 +287,7 @@ export default function AgentsPage() {
     }
 
     const portRange = serializePortRange(portMode, portStart, portEnd, portList)
-    await axios.patch(`/api/agents/${editTarget.uuid}`, { ...values, rehlds_port_range: portRange })
+    await api.patch(`/agents/${editTarget.uuid}`, { ...values, rehlds_port_range: portRange })
     message.success('保存成功')
     setEditTarget(null)
     fetchAgents()

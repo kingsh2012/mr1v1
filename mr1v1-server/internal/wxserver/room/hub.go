@@ -35,20 +35,22 @@ type slot struct {
 }
 
 type Hub struct {
-	mu         sync.Mutex
-	roomID     string
-	backendURL string
-	store      *store.Store
-	slots      [2]*slot // 0=creator, 1=joiner
-	onEmpty    func()   // called when both slots are disconnected
+	mu             sync.Mutex
+	roomID         string
+	backendURL     string
+	internalAPIKey string
+	store          *store.Store
+	slots          [2]*slot // 0=creator, 1=joiner
+	onEmpty        func()   // called when both slots are disconnected
 }
 
-func newHub(roomID, backendURL string, s *store.Store, onEmpty func()) *Hub {
+func newHub(roomID, backendURL, internalAPIKey string, s *store.Store, onEmpty func()) *Hub {
 	return &Hub{
-		roomID:     roomID,
-		backendURL: backendURL,
-		store:      s,
-		onEmpty:    onEmpty,
+		roomID:         roomID,
+		backendURL:     backendURL,
+		internalAPIKey: internalAPIKey,
+		store:          s,
+		onEmpty:        onEmpty,
 	}
 }
 
@@ -189,7 +191,15 @@ func (h *Hub) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr stri
 		"p1_steamid": p1SteamID,
 	})
 	client := &http.Client{Timeout: 15 * time.Second}
-	resp, err := client.Post(h.backendURL+"/api/manager/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
+	req, err := http.NewRequest(http.MethodPost, h.backendURL+"/api/manager/matches", bytes.NewReader(body))
+	if err != nil {
+		return "", "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if h.internalAPIKey != "" {
+		req.Header.Set("X-API-Key", h.internalAPIKey)
+	}
+	resp, err := client.Do(req) //nolint:gosec
 	if err != nil {
 		return "", "", fmt.Errorf("call backend: %w", err)
 	}

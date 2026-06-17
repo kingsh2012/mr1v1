@@ -13,13 +13,14 @@ import (
 )
 
 type Matchmaker struct {
-	mu         sync.Mutex
-	queue      []*models.Player
-	backendURL string
+	mu             sync.Mutex
+	queue          []*models.Player
+	backendURL     string
+	internalAPIKey string
 }
 
-func New(backendURL string) *Matchmaker {
-	return &Matchmaker{backendURL: backendURL}
+func New(backendURL, internalAPIKey string) *Matchmaker {
+	return &Matchmaker{backendURL: backendURL, internalAPIKey: internalAPIKey}
 }
 
 func (m *Matchmaker) Join(p *models.Player) {
@@ -94,7 +95,15 @@ func (m *Matchmaker) createMatch(p0SteamID, p1SteamID string) (matchID, serverAd
 		"p0_steamid": p0SteamID,
 		"p1_steamid": p1SteamID,
 	})
-	resp, err := http.Post(m.backendURL+"/api/manager/matches", "application/json", bytes.NewReader(body)) //nolint:gosec
+	req, err := http.NewRequest(http.MethodPost, m.backendURL+"/api/manager/matches", bytes.NewReader(body))
+	if err != nil {
+		return "", "", fmt.Errorf("build request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if m.internalAPIKey != "" {
+		req.Header.Set("X-API-Key", m.internalAPIKey)
+	}
+	resp, err := http.DefaultClient.Do(req) //nolint:gosec
 	if err != nil {
 		return "", "", fmt.Errorf("call backend: %w", err)
 	}

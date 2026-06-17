@@ -1,16 +1,25 @@
+import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
+import { Layout, Menu, Button } from 'antd'
+import { RobotOutlined, CloudServerOutlined, TrophyOutlined, LogoutOutlined } from '@ant-design/icons'
 import { useState } from 'react'
-import { Layout, Menu } from 'antd'
-import { RobotOutlined, CloudServerOutlined, TrophyOutlined } from '@ant-design/icons'
 import AgentsPage from './pages/AgentsPage'
 import RehldsConfigPage from './pages/RehldsConfigPage'
 import MatchesPage from './pages/MatchesPage'
+import LoginPage from './pages/LoginPage'
+import api from './api'
 
-const { Sider, Content } = Layout
+const { Sider, Content, Header } = Layout
 
 type PageKey = 'matches' | 'agents' | 'rehlds'
 
-export default function App() {
+function MainLayout() {
   const [page, setPage] = useState<PageKey>('matches')
+  const navigate = useNavigate()
+
+  async function logout() {
+    await api.post('/auth/logout').catch(() => {})
+    navigate('/login', { replace: true })
+  }
 
   return (
     <Layout style={{ minHeight: '100vh' }}>
@@ -31,6 +40,9 @@ export default function App() {
         />
       </Sider>
       <Layout>
+        <Header style={{ background: '#fff', padding: '0 24px', display: 'flex', alignItems: 'center', justifyContent: 'flex-end' }}>
+          <Button icon={<LogoutOutlined />} onClick={logout} type="text">退出登录</Button>
+        </Header>
         <Content style={{ padding: 24 }}>
           {page === 'matches' && <MatchesPage />}
           {page === 'agents' && <AgentsPage />}
@@ -38,5 +50,16 @@ export default function App() {
         </Content>
       </Layout>
     </Layout>
+  )
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route path="/*" element={<MainLayout />} />
+      </Routes>
+    </BrowserRouter>
   )
 }

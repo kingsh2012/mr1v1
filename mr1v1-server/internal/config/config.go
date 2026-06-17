@@ -98,6 +98,7 @@ type BackendConfig struct {
 	MatchPlayingTimeoutSeconds int
 	AdminUser                  string
 	AdminPass                  string
+	InternalAPIKey             string
 }
 
 // autoClientID 在 MQTT_CLIENT_ID 未设置时自动生成唯一 client_id。
@@ -194,6 +195,7 @@ func LoadBackendFromEnv() *BackendConfig {
 	cfg.MatchPlayingTimeoutSeconds = envIntOr("MATCH_PLAYING_TIMEOUT_SECONDS", 900)
 	cfg.AdminUser = envOr("ADMIN_USER", "admin")
 	cfg.AdminPass = envOr("ADMIN_PASS", "")
+	cfg.InternalAPIKey = envOr("INTERNAL_API_KEY", "")
 	return cfg
 }
 

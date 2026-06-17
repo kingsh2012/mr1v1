@@ -5,7 +5,7 @@ import {
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { PlusOutlined, DeleteOutlined, PoweroffOutlined, ReloadOutlined } from '@ant-design/icons'
-import axios from 'axios'
+import api from '../api'
 import dayjs from 'dayjs'
 
 const { Text } = Typography
@@ -226,7 +226,7 @@ export default function MatchesPage() {
   const fetchMatches = async () => {
     setLoading(true)
     try {
-      const res = await axios.get<Match[]>('/api/matches')
+      const res = await api.get<Match[]>('/matches')
       setMatches(res.data ?? [])
     } finally {
       setLoading(false)
@@ -243,7 +243,7 @@ export default function MatchesPage() {
     const values = await form.validateFields()
     setCreating(true)
     try {
-      const res = await axios.post('/api/matches', values)
+      const res = await api.post('/matches', values)
       message.success(`比赛已创建，match_id: ${res.data.match_id}`)
       setCreateOpen(false)
       form.resetFields()
@@ -256,13 +256,13 @@ export default function MatchesPage() {
   }
 
   const handleEnd = async (matchID: string) => {
-    await axios.post(`/api/matches/${matchID}/end`)
+    await api.post(`/matches/${matchID}/end`)
     message.success('已发送结束指令（RCON倒计时后销毁）')
     fetchMatches()
   }
 
   const handleDestroy = async (matchID: string) => {
-    await axios.post(`/api/matches/${matchID}/destroy`)
+    await api.post(`/matches/${matchID}/destroy`)
     message.success('已发送强制销毁指令')
     fetchMatches()
   }
@@ -272,7 +272,7 @@ export default function MatchesPage() {
     logsFetchedRef.current.add(matchID)
     setLogsLoading(prev => new Set(prev).add(matchID))
     try {
-      const res = await axios.get<OpLog[]>(`/api/matches/${matchID}/logs`)
+      const res = await api.get<OpLog[]>(`/matches/${matchID}/logs`)
       setLogsCache(prev => ({ ...prev, [matchID]: res.data ?? [] }))
     } catch {
       setLogsCache(prev => ({ ...prev, [matchID]: [] }))
@@ -286,7 +286,7 @@ export default function MatchesPage() {
     serverFetchedRef.current.add(matchID)
     setServerLoading(prev => new Set(prev).add(matchID))
     try {
-      const res = await axios.get<ServerQuery>(`/api/matches/${matchID}/server`)
+      const res = await api.get<ServerQuery>(`/matches/${matchID}/server`)
       setServerCache(prev => ({ ...prev, [matchID]: res.data }))
     } catch (e: any) {
       const msg = e?.response?.data || e?.message || '请求失败'

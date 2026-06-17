@@ -9,16 +9,18 @@ type WxConfig struct {
 	Port           string
 	DatabaseURL    string // PostgreSQL DSN
 	LegacyAPIURL   string // 老玩家数据源 URL（含 token）
+	InternalAPIKey string // 与 backend 共享的内部调用 key
 }
 
 func LoadWx() *WxConfig {
 	return &WxConfig{
-		WxAppID:      getEnv("WX_APP_ID", ""),
-		WxAppSecret:  getEnv("WX_APP_SECRET", ""),
-		BackendURL:   getEnv("BACKEND_URL", "http://127.0.0.1:8181"),
-		Port:         getEnv("WX_PORT", "8082"),
-		DatabaseURL:  getEnv("DATABASE_URL", ""),
-		LegacyAPIURL: getEnv("LEGACY_API_URL", ""),
+		WxAppID:        getEnv("WX_APP_ID", ""),
+		WxAppSecret:    getEnv("WX_APP_SECRET", ""),
+		BackendURL:     getEnv("BACKEND_URL", "http://127.0.0.1:8181"),
+		Port:           getEnv("WX_PORT", "8082"),
+		DatabaseURL:    getEnv("DATABASE_URL", ""),
+		LegacyAPIURL:   getEnv("LEGACY_API_URL", ""),
+		InternalAPIKey: getEnv("INTERNAL_API_KEY", ""),
 	}
 }
 
