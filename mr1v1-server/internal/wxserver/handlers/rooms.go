@@ -179,10 +179,10 @@ func RoomWSHandler(s *store.Store, mgr *room.Manager, wsPrefix string) http.Hand
 		}
 
 		u, _ := s.GetUser(r.Context(), openid)
-		name := ""
-		steamID := ""
+		name, avatar, steamID := "", "", ""
 		if u != nil {
 			name = u.Nickname
+			avatar = u.AvatarURL
 			steamID = u.SteamID
 		}
 
@@ -192,6 +192,6 @@ func RoomWSHandler(s *store.Store, mgr *room.Manager, wsPrefix string) http.Hand
 		}
 
 		hub := mgr.GetOrCreate(roomID)
-		hub.Connect(conn, openid, name, steamID, role)
+		hub.Connect(conn, openid, name, avatar, steamID, role)
 	}
 }

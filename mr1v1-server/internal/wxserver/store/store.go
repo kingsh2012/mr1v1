@@ -121,8 +121,10 @@ type Room struct {
 	Title         string `json:"title"`
 	CreatorOpenID string `json:"creator_openid"`
 	CreatorName   string `json:"creator_name"`
+	CreatorAvatar string `json:"creator_avatar"`
 	JoinerOpenID  string `json:"joiner_openid,omitempty"`
 	JoinerName    string `json:"joiner_name,omitempty"`
+	JoinerAvatar  string `json:"joiner_avatar,omitempty"`
 	Locked        bool   `json:"locked"`
 	Status        string `json:"status"` // waiting|ready|matched
 }
@@ -137,8 +139,10 @@ func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, passwo
 func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id, r.title, r.creator_openid, COALESCE(u.nickname,'') AS creator_name,
+		       COALESCE(u.avatar_url,'') AS creator_avatar,
 		       COALESCE(r.joiner_openid,'') AS joiner_openid,
 		       COALESCE(j.nickname,'') AS joiner_name,
+		       COALESCE(j.avatar_url,'') AS joiner_avatar,
 		       r.password != '' AS locked, r.status
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
@@ -155,7 +159,8 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 	for rows.Next() {
 		var rm Room
 		if err := rows.Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
-			&rm.JoinerOpenID, &rm.JoinerName, &rm.Locked, &rm.Status); err != nil {
+			&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
+			&rm.Locked, &rm.Status); err != nil {
 			return nil, err
 		}
 		rooms = append(rooms, rm)
@@ -168,14 +173,17 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 	var password string
 	err := s.pool.QueryRow(ctx, `
 		SELECT r.id, r.title, r.creator_openid, COALESCE(u.nickname,''),
+		       COALESCE(u.avatar_url,''),
 		       COALESCE(r.joiner_openid,''), COALESCE(j.nickname,''),
+		       COALESCE(j.avatar_url,''),
 		       r.password, r.status
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
 		WHERE r.id = $1
 	`, id).Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
-		&rm.JoinerOpenID, &rm.JoinerName, &password, &rm.Status)
+		&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
+		&password, &rm.Status)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}

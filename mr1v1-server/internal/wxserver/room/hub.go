@@ -16,18 +16,20 @@ import (
 )
 
 type Event struct {
-	Type      string `json:"type"`
-	Content   string `json:"content,omitempty"`
-	Role      string `json:"role,omitempty"`
-	Name      string `json:"name,omitempty"`
+	Type       string `json:"type"`
+	Content    string `json:"content,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Avatar     string `json:"avatar,omitempty"`
 	ServerAddr string `json:"server_addr,omitempty"`
-	MatchID   string `json:"match_id,omitempty"`
-	Message   string `json:"message,omitempty"`
+	MatchID    string `json:"match_id,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 type slot struct {
 	openid    string
 	name      string
+	avatar    string
 	steamID   string
 	role      string // "creator" | "joiner"
 	confirmed bool
@@ -56,19 +58,19 @@ func newHub(roomID, backendURL, internalAPIKey string, s *store.Store, onEmpty f
 
 // Connect attaches a WebSocket connection to the hub.
 // role must be "creator" or "joiner".
-func (h *Hub) Connect(conn *websocket.Conn, openid, name, steamID, role string) {
+func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role string) {
 	h.mu.Lock()
 	idx := 0
 	if role == "joiner" {
 		idx = 1
 	}
-	h.slots[idx] = &slot{openid: openid, name: name, steamID: steamID, role: role, conn: conn}
+	h.slots[idx] = &slot{openid: openid, name: name, avatar: avatar, steamID: steamID, role: role, conn: conn}
 	other := h.slots[1-idx]
 	h.mu.Unlock()
 
 	// notify the other player that someone joined/is-present
 	if other != nil && role == "joiner" {
-		h.send(other.conn, Event{Type: "player_joined", Name: name, Role: "joiner"})
+		h.send(other.conn, Event{Type: "player_joined", Name: name, Avatar: avatar, Role: "joiner"})
 	}
 
 	// read loop
@@ -125,7 +127,13 @@ func (h *Hub) handleConfirm(idx int, openid, name, steamID, role string) {
 	joiner := h.slots[1]
 	h.mu.Unlock()
 
-	h.broadcast(Event{Type: "confirmed", Role: role, Name: name})
+	h.mu.Lock()
+	myAvatar := ""
+	if h.slots[idx] != nil {
+		myAvatar = h.slots[idx].avatar
+	}
+	h.mu.Unlock()
+	h.broadcast(Event{Type: "confirmed", Role: role, Name: name, Avatar: myAvatar})
 
 	if creator != nil && joiner != nil && creator.confirmed && joiner.confirmed {
 		h.triggerMatch(creator, joiner)
