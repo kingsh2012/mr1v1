@@ -75,7 +75,8 @@ func UserHandler(s *store.Store) http.HandlerFunc {
 				http.Error(w, "db error", http.StatusInternalServerError)
 				return
 			}
-			w.WriteHeader(http.StatusNoContent)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]string{"ok": "1"})
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
