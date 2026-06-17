@@ -3,5 +3,5 @@ RUN apk add --no-cache ca-certificates tzdata \
     && ln -sf /usr/share/zoneinfo/Asia/Shanghai /etc/localtime \
     && echo "Asia/Shanghai" > /etc/timezone
 WORKDIR /app
-COPY mr1v1-backend ./mr1v1-backend
-ENTRYPOINT ["./mr1v1-backend"]
+COPY mr1v1-manager-backend ./mr1v1-manager-backend
+ENTRYPOINT ["./mr1v1-manager-backend"]

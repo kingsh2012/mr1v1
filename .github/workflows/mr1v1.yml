@@ -4,17 +4,17 @@ on:
   push:
     tags:
       - 'mr1v1-consumer-v*'
-      - 'mr1v1-backend-v*'
+      - 'mr1v1-manager-backend-v*'
       - 'mr1v1-agent-v*'
-      - 'mr1v1-wx-v*'
+      - 'mr1v1-miniprogram-backend-v*'
     branches: ["main"]
 
 env:
   REGISTRY: registry.cn-beijing.aliyuncs.com
   CONSUMER_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer
-  BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend
+  BACKEND_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend
   AGENT_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent
-  WX_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-wx
+  WX_IMAGE: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend
 
 jobs:
   warm-cache:
@@ -99,7 +99,7 @@ jobs:
           tags: ${{ env.CONSUMER_IMAGE }}:${{ steps.meta.outputs.version }}
 
   build-backend:
-    if: startsWith(github.ref, 'refs/tags/mr1v1-backend-v')
+    if: startsWith(github.ref, 'refs/tags/mr1v1-manager-backend-v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -107,7 +107,7 @@ jobs:
 
       - name: Resolve version
         id: meta
-        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-backend-v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-manager-backend-v}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -145,8 +145,8 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
           go build -trimpath -ldflags="-s -w" \
-            -o mr1v1-backend ./cmd/backend
-          upx --best mr1v1-backend
+            -o mr1v1-manager-backend ./cmd/manager-backend
+          upx --best mr1v1-manager-backend
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -162,7 +162,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: mr1v1-server
-          file: mr1v1-server/dockerfile/Dockerfile-backend
+          file: mr1v1-server/dockerfile/Dockerfile-manager-backend
           push: true
           tags: ${{ env.BACKEND_IMAGE }}:${{ steps.meta.outputs.version }}
 
@@ -222,7 +222,7 @@ jobs:
           tags: ${{ env.AGENT_IMAGE }}:${{ steps.meta.outputs.version }}
 
   build-wx:
-    if: startsWith(github.ref, 'refs/tags/mr1v1-wx-v')
+    if: startsWith(github.ref, 'refs/tags/mr1v1-miniprogram-backend-v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -230,7 +230,7 @@ jobs:
 
       - name: Resolve version
         id: meta
-        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-wx-v}" >> "$GITHUB_OUTPUT"
+        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-miniprogram-backend-v}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -255,8 +255,8 @@ jobs:
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
           go build -trimpath -ldflags="-s -w" \
-            -o mr1v1-wx ./cmd/mr1v1-wx
-          upx --best mr1v1-wx
+            -o mr1v1-miniprogram-backend ./cmd/miniprogram-backend
+          upx --best mr1v1-miniprogram-backend
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -272,6 +272,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: mr1v1-server
-          file: mr1v1-server/dockerfile/Dockerfile-wx
+          file: mr1v1-server/dockerfile/Dockerfile-miniprogram-backend
           push: true
           tags: ${{ env.WX_IMAGE }}:${{ steps.meta.outputs.version }}
