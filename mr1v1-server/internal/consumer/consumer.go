@@ -2,10 +2,12 @@
 package consumer
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -89,6 +91,33 @@ func (c *Consumer) Close() {
 	c.pool.Close()
 }
 
+// notifyWxMatchEnded 比赛正常完赛时同步通知 wxserver 关闭对应房间（如果是
+// 通过小程序房间发起的比赛）。异步、失败只记日志，不影响主流程。
+func (c *Consumer) notifyWxMatchEnded(matchID, state string) {
+	if c.cfg.WxBackendURL == "" {
+		return
+	}
+	go func() {
+		body, _ := json.Marshal(map[string]string{"match_id": matchID, "state": state})
+		req, err := http.NewRequest(http.MethodPost, c.cfg.WxBackendURL+"/api/wx/internal/match-ended", bytes.NewReader(body))
+		if err != nil {
+			slog.Warn("build notify wx match-ended request failed", "match_id", matchID, "error", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.cfg.InternalAPIKey != "" {
+			req.Header.Set("X-API-Key", c.cfg.InternalAPIKey)
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Warn("notify wx match-ended failed", "match_id", matchID, "error", err)
+			return
+		}
+		defer resp.Body.Close()
+	}()
+}
+
 func (c *Consumer) onMessage(_ mqtt.Client, msg mqtt.Message) {
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Payload(), &env); err != nil {
@@ -169,14 +198,18 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 		); err != nil {
 			return err
 		}
-		if _, err := c.pool.Exec(ctx,
+		tag, err := c.pool.Exec(ctx,
 			`UPDATE manager_matches SET state='finished', updated_at=NOW()
 			 WHERE match_id=$1 AND state != 'finished'`,
 			d.MatchID,
-		); err != nil {
+		)
+		if err != nil {
 			return err
 		}
-		_, err := c.pool.Exec(ctx,
+		if tag.RowsAffected() > 0 {
+			c.notifyWxMatchEnded(d.MatchID, "finished")
+		}
+		_, err = c.pool.Exec(ctx,
 			`INSERT INTO manager_operation_logs (match_id, actor, action, detail)
 			 VALUES ($1,'game','match_ended',$2)`,
 			d.MatchID,

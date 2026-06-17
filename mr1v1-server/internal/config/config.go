@@ -44,6 +44,8 @@ type ConsumerConfig struct {
 		SSLMode  string
 		Timezone string
 	}
+	WxBackendURL   string // 比赛结束时同步通知 wxserver 关闭对应房间
+	InternalAPIKey string // 与 wxserver 共享的内部调用 key
 }
 
 // AgentConfig 对应 cmd/agent。
@@ -101,6 +103,7 @@ type BackendConfig struct {
 	InternalAPIKey             string
 	LegacyAPIURL               string
 	LegacySyncIntervalMinutes  int
+	WxBackendURL               string // 比赛结束时同步通知 wxserver 关闭对应房间
 }
 
 // autoClientID 在 MQTT_CLIENT_ID 未设置时自动生成唯一 client_id。
@@ -158,6 +161,8 @@ func LoadConsumerFromEnv() *ConsumerConfig {
 	cfg.DB.DBName = envOr("DB_NAME", "mr1v1")
 	cfg.DB.SSLMode = envOr("DB_SSL_MODE", "disable")
 	cfg.DB.Timezone = envOr("DB_TIMEZONE", "Asia/Shanghai")
+	cfg.WxBackendURL = envOr("WX_BACKEND_URL", "http://127.0.0.1:8082")
+	cfg.InternalAPIKey = envOr("INTERNAL_API_KEY", "")
 	return cfg
 }
 
@@ -200,6 +205,7 @@ func LoadBackendFromEnv() *BackendConfig {
 	cfg.InternalAPIKey = envOr("INTERNAL_API_KEY", "")
 	cfg.LegacyAPIURL = envOr("LEGACY_API_URL", "")
 	cfg.LegacySyncIntervalMinutes = envIntOr("LEGACY_SYNC_INTERVAL_MINUTES", 60)
+	cfg.WxBackendURL = envOr("WX_BACKEND_URL", "http://127.0.0.1:8082")
 	return cfg
 }
 

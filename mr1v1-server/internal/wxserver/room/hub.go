@@ -223,6 +223,29 @@ func (h *Hub) CloseByCreator() {
 	}
 }
 
+// NotifyMatchEnded 由 manager-backend/consumer 同步通知触发（比赛被手动销毁/
+// 超时/异常停止/正常完赛），告知仍停留在房间页的玩家，并断开双方连接。
+func (h *Hub) NotifyMatchEnded(message string) {
+	h.mu.Lock()
+	s0, s1 := h.slots[0], h.slots[1]
+	h.slots[0] = nil
+	h.slots[1] = nil
+	h.mu.Unlock()
+
+	e := Event{Type: "match_ended", Message: message}
+	if s0 != nil {
+		h.send(s0.conn, e)
+		s0.conn.Close()
+	}
+	if s1 != nil {
+		h.send(s1.conn, e)
+		s1.conn.Close()
+	}
+	if h.onEmpty != nil {
+		h.onEmpty()
+	}
+}
+
 func (h *Hub) broadcast(e Event) {
 	h.mu.Lock()
 	s0, s1 := h.slots[0], h.slots[1]

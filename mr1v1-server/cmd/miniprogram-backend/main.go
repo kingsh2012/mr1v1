@@ -59,6 +59,9 @@ func main() {
 	ws.GET("/room/:id", handlers.RoomWS(s, mgr))
 	ws.GET("/matchmaking", handlers.Matchmaking(mm, s))
 
+	internal := r.Group("/api/wx/internal", handlers.InternalAuth(cfg.InternalAPIKey))
+	internal.POST("/match-ended", handlers.MatchEnded(s, mgr))
+
 	slog.Info("mr1v1-wx listening", "addr", ":"+cfg.Port, "backend", cfg.BackendURL)
 	if err := r.Run(":" + cfg.Port); err != nil {
 		slog.Error("server stopped", "error", err)

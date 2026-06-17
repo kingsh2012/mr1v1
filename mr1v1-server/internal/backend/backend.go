@@ -3,6 +3,7 @@
 package backend
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"embed"
@@ -162,6 +163,7 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 		}
 		b.pool.Exec(ctx,
 			`UPDATE manager_matches SET state='timeout', updated_at=NOW() WHERE match_id=$1`, m.matchID)
+		b.notifyWxMatchEnded(m.matchID, "timeout")
 		b.writeLog(m.matchID, "platform", "timeout_destroy", map[string]any{
 			"prev_state":  m.state,
 			"agent_uuid":  m.agentUUID,
@@ -235,10 +237,13 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 		action = "container_error"
 	case agentproto.StateStopped:
 		// 只有意外停止才标 error；finished/terminated/timeout/error 已是终态不覆盖
-		b.pool.Exec(context.Background(),
+		tag, _ := b.pool.Exec(context.Background(),
 			`UPDATE manager_matches SET state='error', updated_at=NOW()
 			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','timeout','error')`,
 			status.MatchID)
+		if tag.RowsAffected() > 0 {
+			b.notifyWxMatchEnded(status.MatchID, "error")
+		}
 		b.writeLog(status.MatchID, "agent", "container_stopped", status)
 		return
 	default:
@@ -499,6 +504,7 @@ func (b *Backend) dispatchDestroy(c *gin.Context, force bool) {
 	// 平台主动终止 → terminated（不参与结算），区别于正常 finished 和意外 error
 	b.pool.Exec(c.Request.Context(),
 		`UPDATE manager_matches SET state='terminated', updated_at=NOW() WHERE match_id=$1`, matchID)
+	b.notifyWxMatchEnded(matchID, "terminated")
 
 	action := "end_dispatched"
 	if force {
@@ -566,6 +572,33 @@ func (b *Backend) writeLog(matchID, actor, action string, detail any) {
 	); err != nil {
 		slog.Error("write operation log failed", "error", err, "action", action)
 	}
+}
+
+// notifyWxMatchEnded 比赛进入终态时同步通知 wxserver 关闭对应房间（如果是
+// 通过小程序房间发起的比赛）。异步、失败只记日志，不影响主流程。
+func (b *Backend) notifyWxMatchEnded(matchID, state string) {
+	if b.cfg.WxBackendURL == "" {
+		return
+	}
+	go func() {
+		body, _ := json.Marshal(map[string]string{"match_id": matchID, "state": state})
+		req, err := http.NewRequest(http.MethodPost, b.cfg.WxBackendURL+"/api/wx/internal/match-ended", bytes.NewReader(body))
+		if err != nil {
+			slog.Warn("build notify wx match-ended request failed", "match_id", matchID, "error", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if b.cfg.InternalAPIKey != "" {
+			req.Header.Set("X-API-Key", b.cfg.InternalAPIKey)
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Warn("notify wx match-ended failed", "match_id", matchID, "error", err)
+			return
+		}
+		defer resp.Body.Close()
+	}()
 }
 
 // activeRehldsImage 从PG查询当前生效的rehlds镜像。

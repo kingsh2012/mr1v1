@@ -16,6 +16,8 @@ services:
       - DB_NAME=mr1v1
       - DB_SSL_MODE=disable
       - DB_TIMEZONE=Asia/Shanghai
+      - WX_BACKEND_URL=http://127.0.0.1:8082
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
   mr1v1-miniprogram-backend:
     image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.5
@@ -53,3 +55,4 @@ services:
       - ADMIN_PASS=${ADMIN_PASS}
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
       - LEGACY_API_URL=${LEGACY_API_URL}
+      - WX_BACKEND_URL=http://127.0.0.1:8082

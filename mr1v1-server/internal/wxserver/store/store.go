@@ -206,6 +206,19 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 	return &rm, nil
 }
 
+// GetRoomIDByMatchID 根据 manager-backend 的 match_id 反查房间 id，
+// 用于比赛结束时（手动销毁/超时/异常停止/正常完赛）同步关闭对应房间。
+func (s *Store) GetRoomIDByMatchID(ctx context.Context, matchID string) (string, error) {
+	var id string
+	err := s.pool.QueryRow(ctx, `
+		SELECT id FROM wx_rooms WHERE match_id = $1 AND deleted_at IS NULL
+	`, matchID).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return id, err
+}
+
 func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) {
 	var pw string
 	err := s.pool.QueryRow(ctx, `SELECT password FROM wx_rooms WHERE id = $1 AND deleted_at IS NULL`, id).Scan(&pw)

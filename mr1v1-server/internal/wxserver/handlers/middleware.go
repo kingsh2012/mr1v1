@@ -32,6 +32,18 @@ func Auth(s *store.Store) gin.HandlerFunc {
 	}
 }
 
+// InternalAuth 校验服务间调用的 X-API-Key（manager-backend/consumer 同步
+// 比赛结束状态时使用），未配置 key 时直接拒绝，避免裸奔。
+func InternalAuth(internalAPIKey string) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if internalAPIKey == "" || c.GetHeader("X-API-Key") != internalAPIKey {
+			resp.Fail(c, 401, "unauthorized")
+			return
+		}
+		c.Next()
+	}
+}
+
 func openid(c *gin.Context) string {
 	v, _ := c.Get("openid")
 	s, _ := v.(string)
