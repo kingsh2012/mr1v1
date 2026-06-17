@@ -43,6 +43,7 @@ type Hub struct {
 	internalAPIKey string
 	store          *store.Store
 	slots          [2]*slot // 0=creator, 1=joiner
+	history        []Event  // chat history
 	onEmpty        func()   // called when both slots are disconnected
 }
 
@@ -66,7 +67,16 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 	}
 	h.slots[idx] = &slot{openid: openid, name: name, avatar: avatar, steamID: steamID, role: role, conn: conn}
 	other := h.slots[1-idx]
+	history := append([]Event(nil), h.history...)
 	h.mu.Unlock()
+
+	// send chat history to reconnecting player
+	if len(history) > 0 {
+		h.send(conn, Event{Type: "history", Content: func() string {
+			data, _ := json.Marshal(history)
+			return string(data)
+		}()})
+	}
 
 	// notify the other player that someone joined/is-present
 	if other != nil && role == "joiner" {
@@ -85,7 +95,11 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 		}
 		switch msg.Type {
 		case "chat":
-			h.broadcast(Event{Type: "chat", Role: role, Name: name, Content: msg.Content})
+			e := Event{Type: "chat", Role: role, Name: name, Content: msg.Content}
+			h.mu.Lock()
+			h.history = append(h.history, e)
+			h.mu.Unlock()
+			h.broadcast(e)
 		case "confirm":
 			h.handleConfirm(idx, openid, name, steamID, role)
 		case "cancel_confirm":
