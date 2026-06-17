@@ -3,8 +3,8 @@ PROCS.PRO-REHLDS-STARTUP/
 PROCS.PRO-REHLDS-COLLECTION-SYSTEM/
 mr1v1-miniprogram/
 # Go binaries
-mr1v1-mr1v1-rehlds/mr1v1-*
-mr1v1-mr1v1-rehlds/cmd/*/dist
+mr1v1-server/mr1v1-*
+mr1v1-server/cmd/*/dist
 # Frontend build artifacts in wrong locations
 mr1v1-collector/internal/backend/static/assets/
 mr1v1-collector/internal/backend/static/*.html
