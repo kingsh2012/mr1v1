@@ -15,6 +15,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
@@ -34,6 +35,8 @@ type Backend struct {
 	client     mqtt.Client
 	pool       *pgxpool.Pool
 	cancelLoop context.CancelFunc
+	sessions   map[string]string // token → username
+	sessionsMu sync.RWMutex
 }
 
 // New 连接MQTT broker和PostgreSQL，返回可用的Backend。
@@ -64,7 +67,7 @@ func New(cfg *config.BackendConfig) (*Backend, error) {
 
 	// 订阅status回报，仅用于日志
 	ctx, cancel := context.WithCancel(context.Background())
-	b := &Backend{cfg: cfg, client: client, pool: pool, cancelLoop: cancel}
+	b := &Backend{cfg: cfg, client: client, pool: pool, cancelLoop: cancel, sessions: make(map[string]string)}
 	if token := client.Subscribe(agentproto.StatusSubscribeFilter, 1, b.onStatus); token.Wait() && token.Error() != nil {
 		cancel()
 		client.Disconnect(250)
@@ -165,10 +168,14 @@ func (b *Backend) Handler(prefix string) http.Handler {
 	mux.HandleFunc("GET "+prefix+"/rehlds-configs", b.handleListRehldsConfigs)
 	mux.HandleFunc("POST "+prefix+"/rehlds-configs", b.handleCreateRehldsConfig)
 	mux.HandleFunc("PATCH "+prefix+"/rehlds-configs/{id}/activate", b.handleActivateRehldsConfig)
+	// 认证（免鉴权）
+	mux.HandleFunc("GET /login", b.handleLoginPage)
+	mux.HandleFunc("POST "+prefix+"/auth/login", b.handleLogin)
+	mux.HandleFunc("POST "+prefix+"/auth/logout", b.handleLogout)
 	// 健康检查 & 静态文件
 	mux.HandleFunc("GET "+prefix+"/healthz", b.handleHealthz)
 	mux.Handle("/", b.staticHandler())
-	return mux
+	return b.authMiddleware(prefix, mux)
 }
 
 func (b *Backend) handleHealthz(w http.ResponseWriter, _ *http.Request) {
@@ -879,3 +886,160 @@ func generateMatchID() (string, error) {
 	}
 	return hex.EncodeToString(buf), nil
 }
+
+// ── Auth ──────────────────────────────────────────────────────────────────────
+
+const sessionCookie = "mr1v1_session"
+
+// authMiddleware 验证 Cookie session；ADMIN_PASS 未配置时直接放行。
+func (b *Backend) authMiddleware(apiPrefix string, next http.Handler) http.Handler {
+	if b.cfg.AdminPass == "" {
+		slog.Warn("ADMIN_PASS not set, manager UI auth disabled")
+		return next
+	}
+	exempt := map[string]bool{
+		"/login":                           true,
+		apiPrefix + "/auth/login":          true,
+		apiPrefix + "/auth/logout":         true,
+		apiPrefix + "/healthz":             true,
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if exempt[r.URL.Path] {
+			next.ServeHTTP(w, r)
+			return
+		}
+		cookie, err := r.Cookie(sessionCookie)
+		if err == nil {
+			b.sessionsMu.RLock()
+			_, ok := b.sessions[cookie.Value]
+			b.sessionsMu.RUnlock()
+			if ok {
+				next.ServeHTTP(w, r)
+				return
+			}
+		}
+		if strings.HasPrefix(r.URL.Path, "/api/") {
+			w.Header().Set("Content-Type", "application/json")
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		http.Redirect(w, r, "/login", http.StatusFound)
+	})
+}
+
+func (b *Backend) handleLogin(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"bad request"}`, http.StatusBadRequest)
+		return
+	}
+	if req.Username != b.cfg.AdminUser || req.Password != b.cfg.AdminPass {
+		w.Header().Set("Content-Type", "application/json")
+		http.Error(w, `{"error":"invalid credentials"}`, http.StatusUnauthorized)
+		return
+	}
+	tokenBytes := make([]byte, 16)
+	rand.Read(tokenBytes) //nolint:errcheck
+	token := hex.EncodeToString(tokenBytes)
+
+	b.sessionsMu.Lock()
+	b.sessions[token] = req.Username
+	b.sessionsMu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     sessionCookie,
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   86400 * 7,
+	})
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"status": "ok"}) //nolint:errcheck
+}
+
+func (b *Backend) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if cookie, err := r.Cookie(sessionCookie); err == nil {
+		b.sessionsMu.Lock()
+		delete(b.sessions, cookie.Value)
+		b.sessionsMu.Unlock()
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name:   sessionCookie,
+		Value:  "",
+		Path:   "/",
+		MaxAge: -1,
+	})
+	http.Redirect(w, r, "/login", http.StatusFound)
+}
+
+func (b *Backend) handleLoginPage(w http.ResponseWriter, r *http.Request) {
+	// 已登录则直接跳转首页
+	if cookie, err := r.Cookie(sessionCookie); err == nil {
+		b.sessionsMu.RLock()
+		_, ok := b.sessions[cookie.Value]
+		b.sessionsMu.RUnlock()
+		if ok {
+			http.Redirect(w, r, "/", http.StatusFound)
+			return
+		}
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(loginPageHTML)) //nolint:errcheck
+}
+
+// loginPageHTML 是内嵌的登录页，loginPath 由 Handler 注入的 apiPrefix 动态决定。
+// 为避免模板依赖，这里直接把 /api/manager 写死（与 cmd/backend/main.go 保持一致）。
+const loginPageHTML = `<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MR1V1 管理后台</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{min-height:100vh;display:flex;align-items:center;justify-content:center;
+     background:#0f172a;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}
+.card{width:360px;background:#1e293b;border-radius:16px;padding:40px 36px;
+      box-shadow:0 24px 64px rgba(0,0,0,.5)}
+h1{color:#f1f5f9;font-size:22px;font-weight:700;margin-bottom:8px}
+p{color:#64748b;font-size:14px;margin-bottom:28px}
+label{display:block;color:#94a3b8;font-size:13px;margin-bottom:6px}
+input{width:100%;padding:10px 14px;background:#0f172a;border:1px solid #334155;
+      border-radius:8px;color:#f1f5f9;font-size:15px;outline:none;margin-bottom:16px}
+input:focus{border-color:#3b82f6}
+button{width:100%;padding:11px;background:#3b82f6;color:#fff;border:none;
+       border-radius:8px;font-size:15px;font-weight:600;cursor:pointer;margin-top:4px}
+button:hover{background:#2563eb}
+.err{color:#f87171;font-size:13px;margin-top:12px;display:none}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>MR1V1 管理后台</h1>
+  <p>请登录以继续</p>
+  <label>用户名</label>
+  <input id="u" type="text" autocomplete="username" placeholder="admin">
+  <label>密码</label>
+  <input id="p" type="password" autocomplete="current-password">
+  <button onclick="login()">登 录</button>
+  <div class="err" id="err">用户名或密码错误</div>
+</div>
+<script>
+document.addEventListener('keydown',e=>{ if(e.key==='Enter') login() })
+async function login(){
+  const r=await fetch('/api/manager/auth/login',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({username:document.getElementById('u').value,
+                         password:document.getElementById('p').value})
+  })
+  if(r.ok){ location.href='/' }
+  else{ document.getElementById('err').style.display='block' }
+}
+</script>
+</body>
+</html>`
