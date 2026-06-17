@@ -105,6 +105,13 @@ func (s *Store) UpdateSteamID(ctx context.Context, openid, steamID string) error
 	return err
 }
 
+func (s *Store) UpdateProfile(ctx context.Context, openid, avatarURL, nickname string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE wx_users SET avatar_url = $2, nickname = $3, updated_at = now() WHERE openid = $1
+	`, openid, avatarURL, nickname)
+	return err
+}
+
 // ── Rooms ──────────────────────────────────────────────────────────────────
 
 type Room struct {

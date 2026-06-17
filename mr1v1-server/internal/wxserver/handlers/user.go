@@ -12,6 +12,7 @@ func UserHandler(s *store.Store) http.HandlerFunc {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		if r.Method == http.MethodOptions {
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type,Authorization")
+			w.Header().Set("Access-Control-Allow-Methods", "GET,POST,PATCH,OPTIONS")
 			w.WriteHeader(http.StatusNoContent)
 			return
 		}
@@ -30,12 +31,19 @@ func UserHandler(s *store.Store) http.HandlerFunc {
 				http.Error(w, "db error", http.StatusInternalServerError)
 				return
 			}
-			steamID := ""
+			var steamID, avatarURL, nickname string
 			if u != nil {
 				steamID = u.SteamID
+				avatarURL = u.AvatarURL
+				nickname = u.Nickname
 			}
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(map[string]string{"openid": openid, "steam_id": steamID})
+			json.NewEncoder(w).Encode(map[string]string{
+				"openid":     openid,
+				"steam_id":   steamID,
+				"avatar_url": avatarURL,
+				"nickname":   nickname,
+			})
 
 		case http.MethodPost:
 			var req struct {
@@ -51,6 +59,21 @@ func UserHandler(s *store.Store) http.HandlerFunc {
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"steam_id": req.SteamID})
+
+		case http.MethodPatch:
+			var req struct {
+				AvatarURL string `json:"avatar_url"`
+				Nickname  string `json:"nickname"`
+			}
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				http.Error(w, "bad request", http.StatusBadRequest)
+				return
+			}
+			if err := s.UpdateProfile(r.Context(), openid, req.AvatarURL, req.Nickname); err != nil {
+				http.Error(w, "db error", http.StatusInternalServerError)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
 
 		default:
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
