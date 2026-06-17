@@ -37,10 +37,10 @@ func New(cfg *config.ConsumerConfig) (*Consumer, error) {
 		return nil, fmt.Errorf("connect postgres: %w", err)
 	}
 
-	for _, stmt := range model.Statements {
+	for _, stmt := range model.ConsumerStatements {
 		if _, err := pool.Exec(context.Background(), stmt); err != nil {
 			pool.Close()
-			return nil, fmt.Errorf("migrate tables: %w\nSQL: %s", err, stmt[:min(len(stmt), 80)])
+			return nil, fmt.Errorf("migrate consumer tables: %w\nSQL: %s", err, stmt[:min(len(stmt), 80)])
 		}
 	}
 

@@ -23,6 +23,7 @@ import (
 
 	"mr1v1-server/internal/agentproto"
 	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/model"
 	"mr1v1-server/pkg/a2s"
 )
 
@@ -46,6 +47,13 @@ func New(cfg *config.BackendConfig) (*Backend, error) {
 	pool, err := pgxpool.New(context.Background(), dsn)
 	if err != nil {
 		return nil, fmt.Errorf("connect postgres: %w", err)
+	}
+
+	for _, stmt := range model.BackendStatements {
+		if _, err := pool.Exec(context.Background(), stmt); err != nil {
+			pool.Close()
+			return nil, fmt.Errorf("migrate backend tables: %w\nSQL: %s", err, stmt[:min(len(stmt), 80)])
+		}
 	}
 
 	opts := mqtt.NewClientOptions().

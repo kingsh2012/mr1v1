@@ -1,8 +1,11 @@
-// Package model 定义consumer写入PostgreSQL的表结构及建表DDL。
+// Package model 定义各服务写入PostgreSQL的表结构及建表DDL。
+// 每个服务只执行自己拥有的表的迁移：
+//   - BackendStatements  → backend 启动时执行（控制面表）
+//   - ConsumerStatements → consumer 启动时执行（遥测数据表）
 package model
 
-// Statements 是逐条执行的DDL列表，避免pgx多语句exec只返回最后一条错误的问题。
-var Statements = []string{
+// BackendStatements 是 backend 服务拥有的表，由 backend.New() 执行。
+var BackendStatements = []string{
 	`CREATE TABLE IF NOT EXISTS mr1v1_agent (
 		uuid               VARCHAR(64)  PRIMARY KEY,
 		hostname           VARCHAR(128) NOT NULL DEFAULT '',
@@ -52,6 +55,10 @@ var Statements = []string{
 		created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_op_log_match_id ON mr1v1_operation_log(match_id, created_at)`,
+}
+
+// ConsumerStatements 是 consumer 服务拥有的表，由 consumer.New() 执行。
+var ConsumerStatements = []string{
 	`CREATE TABLE IF NOT EXISTS mr1v1_match_start (
 		id         BIGSERIAL PRIMARY KEY,
 		match_id   VARCHAR(64) NOT NULL UNIQUE,
