@@ -23,6 +23,7 @@ import (
 
 	"mr1v1-server/internal/agentproto"
 	"mr1v1-server/internal/config"
+	"mr1v1-server/internal/legacy"
 	"mr1v1-server/internal/model"
 	"mr1v1-server/pkg/a2s"
 )
@@ -84,6 +85,14 @@ func New(cfg *config.BackendConfig) (*Backend, error) {
 	}
 
 	go b.timeoutLoop(ctx)
+
+	if cfg.LegacyAPIURL != "" {
+		syncer := legacy.NewSyncer(cfg.LegacyAPIURL, pool)
+		go syncer.Start(ctx, time.Duration(cfg.LegacySyncIntervalMinutes)*time.Minute)
+		slog.Info("legacy player sync enabled", "interval_min", cfg.LegacySyncIntervalMinutes)
+	} else {
+		slog.Warn("LEGACY_API_URL not set, legacy player sync disabled")
+	}
 
 	return b, nil
 }

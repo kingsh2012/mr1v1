@@ -4,11 +4,9 @@ import (
 	"context"
 	"log/slog"
 	"net/http"
-	"time"
 
 	wxconfig "mr1v1-server/internal/wxserver/config"
 	"mr1v1-server/internal/wxserver/handlers"
-	"mr1v1-server/internal/wxserver/legacy"
 	"mr1v1-server/internal/wxserver/matchmaker"
 	"mr1v1-server/internal/wxserver/room"
 	"mr1v1-server/internal/wxserver/store"
@@ -48,14 +46,6 @@ func main() {
 	mux.HandleFunc(apiPrefix+"/rooms/", handlers.RoomActionHandler(s, apiPrefix))
 	mux.HandleFunc(wsPrefix+"/room/", handlers.RoomWSHandler(s, mgr, wsPrefix))
 	mux.HandleFunc(wsPrefix+"/matchmaking", handlers.MatchmakingHandler(mm, s))
-
-	if cfg.LegacyAPIURL != "" {
-		syncer := legacy.NewSyncer(cfg.LegacyAPIURL, s)
-		go syncer.Start(ctx, 10*time.Minute)
-		slog.Info("legacy player sync enabled")
-	} else {
-		slog.Warn("LEGACY_API_URL not set, legacy player sync disabled")
-	}
 	mux.HandleFunc(apiPrefix+"/legacy-players/search", handlers.SearchLegacyPlayersHandler(s))
 	mux.HandleFunc(apiPrefix+"/legacy-players/bind", handlers.BindLegacyPlayerHandler(s))
 

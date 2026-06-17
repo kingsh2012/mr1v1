@@ -99,6 +99,8 @@ type BackendConfig struct {
 	AdminUser                  string
 	AdminPass                  string
 	InternalAPIKey             string
+	LegacyAPIURL               string
+	LegacySyncIntervalMinutes  int
 }
 
 // autoClientID 在 MQTT_CLIENT_ID 未设置时自动生成唯一 client_id。
@@ -196,6 +198,8 @@ func LoadBackendFromEnv() *BackendConfig {
 	cfg.AdminUser = envOr("ADMIN_USER", "admin")
 	cfg.AdminPass = envOr("ADMIN_PASS", "")
 	cfg.InternalAPIKey = envOr("INTERNAL_API_KEY", "")
+	cfg.LegacyAPIURL = envOr("LEGACY_API_URL", "")
+	cfg.LegacySyncIntervalMinutes = envIntOr("LEGACY_SYNC_INTERVAL_MINUTES", 60)
 	return cfg
 }
 

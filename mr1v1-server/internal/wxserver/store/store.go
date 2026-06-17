@@ -46,11 +46,6 @@ func (s *Store) Migrate(ctx context.Context) error {
 			openid     TEXT NOT NULL REFERENCES wx_users(openid) ON DELETE CASCADE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
-		CREATE TABLE IF NOT EXISTS wx_legacy_players (
-			steam_id   TEXT PRIMARY KEY,
-			name       TEXT NOT NULL,
-			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-		);
 		CREATE TABLE IF NOT EXISTS wx_rooms (
 			id              TEXT PRIMARY KEY,
 			title           TEXT NOT NULL,
@@ -108,19 +103,6 @@ func (s *Store) UpdateSteamID(ctx context.Context, openid, steamID string) error
 		UPDATE wx_users SET steam_id = $2, updated_at = now() WHERE openid = $1
 	`, openid, steamID)
 	return err
-}
-
-func (s *Store) UpsertLegacyPlayers(ctx context.Context, players []LegacyPlayer) error {
-	for _, p := range players {
-		if _, err := s.pool.Exec(ctx, `
-			INSERT INTO wx_legacy_players (steam_id, name, updated_at)
-			VALUES ($1, $2, now())
-			ON CONFLICT (steam_id) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
-		`, p.SteamID, p.Name); err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ── Rooms ──────────────────────────────────────────────────────────────────
@@ -245,7 +227,7 @@ func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 
 func (s *Store) SearchLegacyPlayers(ctx context.Context, keyword string) ([]LegacyPlayer, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT steam_id, name FROM wx_legacy_players
+		SELECT steam_id, name FROM legacy_players
 		WHERE name ILIKE '%' || $1 || '%'
 		ORDER BY name
 		LIMIT 20
