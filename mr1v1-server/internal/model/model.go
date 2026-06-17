@@ -17,13 +17,11 @@ var BackendStatements = []string{
 		status             VARCHAR(16)  NOT NULL DEFAULT 'enabled',
 		rehlds_run_max     INT          NOT NULL DEFAULT 0,
 		rehlds_port_range  VARCHAR(32)  NOT NULL DEFAULT '',
-		running_containers TEXT         NOT NULL DEFAULT '',
+		containers_json    JSONB        NOT NULL DEFAULT '[]',
 		create_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		update_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		heartbeat_time     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
-	`ALTER TABLE manager_agents ADD COLUMN IF NOT EXISTS running_containers TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE manager_agents ADD COLUMN IF NOT EXISTS containers_json JSONB NOT NULL DEFAULT '[]'`,
 	`CREATE TABLE IF NOT EXISTS manager_rehlds_configs (
 		id          BIGSERIAL    PRIMARY KEY,
 		image       VARCHAR(256) NOT NULL,
