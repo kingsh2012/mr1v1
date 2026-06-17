@@ -1,12 +1,12 @@
 // Package model 定义各服务写入PostgreSQL的表结构及建表DDL。
 // 每个服务只执行自己拥有的表的迁移：
-//   - BackendStatements  → backend 启动时执行（控制面表）
-//   - ConsumerStatements → consumer 启动时执行（遥测数据表）
+//   - BackendStatements  → backend 启动时执行（控制面表，前缀 manager_）
+//   - ConsumerStatements → consumer 启动时执行（遥测数据表，前缀 telemetry_）
 package model
 
 // BackendStatements 是 backend 服务拥有的表，由 backend.New() 执行。
 var BackendStatements = []string{
-	`CREATE TABLE IF NOT EXISTS mr1v1_agent (
+	`CREATE TABLE IF NOT EXISTS manager_agents (
 		uuid               VARCHAR(64)  PRIMARY KEY,
 		hostname           VARCHAR(128) NOT NULL DEFAULT '',
 		public_ip          VARCHAR(64)  NOT NULL DEFAULT '',
@@ -22,9 +22,9 @@ var BackendStatements = []string{
 		update_time        TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		heartbeat_time     TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
-	`ALTER TABLE mr1v1_agent ADD COLUMN IF NOT EXISTS running_containers TEXT NOT NULL DEFAULT ''`,
-	`ALTER TABLE mr1v1_agent ADD COLUMN IF NOT EXISTS containers_json JSONB NOT NULL DEFAULT '[]'`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_rehlds_config (
+	`ALTER TABLE manager_agents ADD COLUMN IF NOT EXISTS running_containers TEXT NOT NULL DEFAULT ''`,
+	`ALTER TABLE manager_agents ADD COLUMN IF NOT EXISTS containers_json JSONB NOT NULL DEFAULT '[]'`,
+	`CREATE TABLE IF NOT EXISTS manager_rehlds_configs (
 		id          BIGSERIAL    PRIMARY KEY,
 		image       VARCHAR(256) NOT NULL,
 		version     VARCHAR(64)  NOT NULL DEFAULT '',
@@ -32,7 +32,7 @@ var BackendStatements = []string{
 		create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
 	`DROP TABLE IF EXISTS mr1v1_match_status`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_match (
+	`CREATE TABLE IF NOT EXISTS manager_matches (
 		match_id    VARCHAR(64)  PRIMARY KEY,
 		p0_steamid  VARCHAR(64)  NOT NULL DEFAULT '',
 		p1_steamid  VARCHAR(64)  NOT NULL DEFAULT '',
@@ -44,9 +44,9 @@ var BackendStatements = []string{
 		create_time TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		update_time TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_match_agent ON mr1v1_match(agent_uuid, state)`,
-	`CREATE INDEX IF NOT EXISTS idx_match_state ON mr1v1_match(state)`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_operation_log (
+	`CREATE INDEX IF NOT EXISTS idx_manager_matches_agent ON manager_matches(agent_uuid, state)`,
+	`CREATE INDEX IF NOT EXISTS idx_manager_matches_state ON manager_matches(state)`,
+	`CREATE TABLE IF NOT EXISTS manager_operation_logs (
 		id         BIGSERIAL    PRIMARY KEY,
 		match_id   VARCHAR(64)  NOT NULL DEFAULT '',
 		actor      VARCHAR(16)  NOT NULL DEFAULT '',
@@ -54,12 +54,12 @@ var BackendStatements = []string{
 		detail     TEXT         NOT NULL DEFAULT '',
 		created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_op_log_match_id ON mr1v1_operation_log(match_id, created_at)`,
+	`CREATE INDEX IF NOT EXISTS idx_manager_operation_logs_match_id ON manager_operation_logs(match_id, created_at)`,
 }
 
 // ConsumerStatements 是 consumer 服务拥有的表，由 consumer.New() 执行。
 var ConsumerStatements = []string{
-	`CREATE TABLE IF NOT EXISTS mr1v1_match_start (
+	`CREATE TABLE IF NOT EXISTS telemetry_match_starts (
 		id         BIGSERIAL PRIMARY KEY,
 		match_id   VARCHAR(64) NOT NULL UNIQUE,
 		map        VARCHAR(64) NOT NULL DEFAULT '',
@@ -72,7 +72,7 @@ var ConsumerStatements = []string{
 		ts         BIGINT      NOT NULL DEFAULT 0,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_round_end (
+	`CREATE TABLE IF NOT EXISTS telemetry_round_ends (
 		id          BIGSERIAL PRIMARY KEY,
 		match_id    VARCHAR(64) NOT NULL,
 		round       INT         NOT NULL DEFAULT 0,
@@ -87,8 +87,8 @@ var ConsumerStatements = []string{
 		ts          BIGINT      NOT NULL DEFAULT 0,
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_round_end_match_id ON mr1v1_round_end(match_id)`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_match_end (
+	`CREATE INDEX IF NOT EXISTS idx_telemetry_round_ends_match_id ON telemetry_round_ends(match_id)`,
+	`CREATE TABLE IF NOT EXISTS telemetry_match_ends (
 		id          BIGSERIAL PRIMARY KEY,
 		match_id    VARCHAR(64) NOT NULL UNIQUE,
 		end_reason  VARCHAR(32) NOT NULL DEFAULT '',
@@ -102,7 +102,7 @@ var ConsumerStatements = []string{
 		ts          BIGINT      NOT NULL DEFAULT 0,
 		created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_combat_event (
+	`CREATE TABLE IF NOT EXISTS telemetry_combat_events (
 		id            BIGSERIAL PRIMARY KEY,
 		match_id      VARCHAR(64) NOT NULL,
 		ts            BIGINT      NOT NULL DEFAULT 0,
@@ -113,8 +113,8 @@ var ConsumerStatements = []string{
 		hitgroup      INT         NOT NULL DEFAULT 0,
 		created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_combat_event_match_id ON mr1v1_combat_event(match_id)`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_shoot_event (
+	`CREATE INDEX IF NOT EXISTS idx_telemetry_combat_events_match_id ON telemetry_combat_events(match_id)`,
+	`CREATE TABLE IF NOT EXISTS telemetry_shoot_events (
 		id             BIGSERIAL PRIMARY KEY,
 		match_id       VARCHAR(64) NOT NULL,
 		ts             BIGINT      NOT NULL DEFAULT 0,
@@ -123,8 +123,8 @@ var ConsumerStatements = []string{
 		ammo_remaining INT         NOT NULL DEFAULT 0,
 		created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_shoot_event_match_id ON mr1v1_shoot_event(match_id)`,
-	`CREATE TABLE IF NOT EXISTS mr1v1_position_event (
+	`CREATE INDEX IF NOT EXISTS idx_telemetry_shoot_events_match_id ON telemetry_shoot_events(match_id)`,
+	`CREATE TABLE IF NOT EXISTS telemetry_position_events (
 		id         BIGSERIAL PRIMARY KEY,
 		match_id   VARCHAR(64) NOT NULL,
 		ts         BIGINT      NOT NULL DEFAULT 0,
@@ -136,5 +136,5 @@ var ConsumerStatements = []string{
 		pitch      DOUBLE PRECISION NOT NULL DEFAULT 0,
 		created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 	)`,
-	`CREATE INDEX IF NOT EXISTS idx_position_event_match_id ON mr1v1_position_event(match_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_telemetry_position_events_match_id ON telemetry_position_events(match_id)`,
 }

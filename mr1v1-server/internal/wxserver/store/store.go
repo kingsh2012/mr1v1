@@ -46,12 +46,12 @@ func (s *Store) Migrate(ctx context.Context) error {
 			openid     TEXT NOT NULL REFERENCES wx_users(openid) ON DELETE CASCADE,
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
-		CREATE TABLE IF NOT EXISTS legacy_players (
+		CREATE TABLE IF NOT EXISTS wx_legacy_players (
 			steam_id   TEXT PRIMARY KEY,
 			name       TEXT NOT NULL,
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
-		CREATE TABLE IF NOT EXISTS rooms (
+		CREATE TABLE IF NOT EXISTS wx_rooms (
 			id              TEXT PRIMARY KEY,
 			title           TEXT NOT NULL,
 			creator_openid  TEXT NOT NULL REFERENCES wx_users(openid),
@@ -113,7 +113,7 @@ func (s *Store) UpdateSteamID(ctx context.Context, openid, steamID string) error
 func (s *Store) UpsertLegacyPlayers(ctx context.Context, players []LegacyPlayer) error {
 	for _, p := range players {
 		if _, err := s.pool.Exec(ctx, `
-			INSERT INTO legacy_players (steam_id, name, updated_at)
+			INSERT INTO wx_legacy_players (steam_id, name, updated_at)
 			VALUES ($1, $2, now())
 			ON CONFLICT (steam_id) DO UPDATE SET name = EXCLUDED.name, updated_at = now()
 		`, p.SteamID, p.Name); err != nil {
@@ -138,7 +138,7 @@ type Room struct {
 
 func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, password string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO rooms (id, title, creator_openid, password) VALUES ($1, $2, $3, $4)
+		INSERT INTO wx_rooms (id, title, creator_openid, password) VALUES ($1, $2, $3, $4)
 	`, id, title, creatorOpenID, password)
 	return err
 }
@@ -149,7 +149,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		       COALESCE(r.joiner_openid,'') AS joiner_openid,
 		       COALESCE(j.nickname,'') AS joiner_name,
 		       r.password != '' AS locked, r.status
-		FROM rooms r
+		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
 		WHERE r.status IN ('waiting','ready')
@@ -179,7 +179,7 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 		SELECT r.id, r.title, r.creator_openid, COALESCE(u.nickname,''),
 		       COALESCE(r.joiner_openid,''), COALESCE(j.nickname,''),
 		       r.password, r.status
-		FROM rooms r
+		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
 		WHERE r.id = $1
@@ -197,7 +197,7 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 
 func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) {
 	var pw string
-	err := s.pool.QueryRow(ctx, `SELECT password FROM rooms WHERE id = $1`, id).Scan(&pw)
+	err := s.pool.QueryRow(ctx, `SELECT password FROM wx_rooms WHERE id = $1`, id).Scan(&pw)
 	if err == pgx.ErrNoRows {
 		return "", nil
 	}
@@ -206,7 +206,7 @@ func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) 
 
 func (s *Store) JoinRoom(ctx context.Context, id, joinerOpenID string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE rooms SET joiner_openid = $2, status = 'ready'
+		UPDATE wx_rooms SET joiner_openid = $2, status = 'ready'
 		WHERE id = $1 AND joiner_openid IS NULL AND status = 'waiting'
 	`, id, joinerOpenID)
 	return err
@@ -216,13 +216,13 @@ func (s *Store) LeaveRoom(ctx context.Context, id, openid string) error {
 	// creator 离开 → 删除房间；joiner 离开 → 清空 joiner，回到 waiting
 	_, err := s.pool.Exec(ctx, `
 		DO $$
-		DECLARE r rooms%ROWTYPE;
+		DECLARE r wx_rooms%ROWTYPE;
 		BEGIN
-			SELECT * INTO r FROM rooms WHERE id = $1;
+			SELECT * INTO r FROM wx_rooms WHERE id = $1;
 			IF r.creator_openid = $2 THEN
-				DELETE FROM rooms WHERE id = $1;
+				DELETE FROM wx_rooms WHERE id = $1;
 			ELSIF r.joiner_openid = $2 THEN
-				UPDATE rooms SET joiner_openid = NULL, status = 'waiting' WHERE id = $1;
+				UPDATE wx_rooms SET joiner_openid = NULL, status = 'waiting' WHERE id = $1;
 			END IF;
 		END $$;
 	`, id, openid)
@@ -231,13 +231,13 @@ func (s *Store) LeaveRoom(ctx context.Context, id, openid string) error {
 
 func (s *Store) SetRoomMatched(ctx context.Context, id, matchID, serverAddr string) error {
 	_, err := s.pool.Exec(ctx, `
-		UPDATE rooms SET status='matched', match_id=$2, server_addr=$3 WHERE id=$1
+		UPDATE wx_rooms SET status='matched', match_id=$2, server_addr=$3 WHERE id=$1
 	`, id, matchID, serverAddr)
 	return err
 }
 
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `DELETE FROM rooms WHERE id = $1`, id)
+	_, err := s.pool.Exec(ctx, `DELETE FROM wx_rooms WHERE id = $1`, id)
 	return err
 }
 
@@ -245,7 +245,7 @@ func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 
 func (s *Store) SearchLegacyPlayers(ctx context.Context, keyword string) ([]LegacyPlayer, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT steam_id, name FROM legacy_players
+		SELECT steam_id, name FROM wx_legacy_players
 		WHERE name ILIKE '%' || $1 || '%'
 		ORDER BY name
 		LIMIT 20

@@ -111,7 +111,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if _, err := c.pool.Exec(ctx,
-			`INSERT INTO mr1v1_match_start
+			`INSERT INTO telemetry_match_starts
 				(match_id,map,p0_name,p0_authid,p0_userid,p1_name,p1_authid,p1_userid,ts)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)
 			 ON CONFLICT (match_id) DO NOTHING`,
@@ -123,14 +123,14 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if _, err := c.pool.Exec(ctx,
-			`UPDATE mr1v1_match SET state='playing', update_time=NOW()
+			`UPDATE manager_matches SET state='playing', update_time=NOW()
 			 WHERE match_id=$1 AND state IN ('creating','waiting')`,
 			d.MatchID,
 		); err != nil {
 			return err
 		}
 		_, err := c.pool.Exec(ctx,
-			`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
+			`INSERT INTO manager_operation_logs (match_id, actor, action, detail)
 			 VALUES ($1,'game','match_started',$2)`,
 			d.MatchID,
 			fmt.Sprintf(`{"map":"%s","p0":"%s","p1":"%s"}`, d.Map, d.P0AuthID, d.P1AuthID),
@@ -143,7 +143,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		_, err := c.pool.Exec(ctx,
-			`INSERT INTO mr1v1_round_end
+			`INSERT INTO telemetry_round_ends
 				(match_id,round,phase,winner_slot,wins0,wins1,p0_damage,p0_hits,p1_damage,p1_hits,ts)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 			d.MatchID, d.Round, d.Phase, d.WinnerSlot,
@@ -159,7 +159,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if _, err := c.pool.Exec(ctx,
-			`INSERT INTO mr1v1_match_end
+			`INSERT INTO telemetry_match_ends
 				(match_id,end_reason,winner_slot,wins0,wins1,p0_name,p0_authid,p1_name,p1_authid,ts)
 			 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 			 ON CONFLICT (match_id) DO NOTHING`,
@@ -171,14 +171,14 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if _, err := c.pool.Exec(ctx,
-			`UPDATE mr1v1_match SET state='finished', update_time=NOW()
+			`UPDATE manager_matches SET state='finished', update_time=NOW()
 			 WHERE match_id=$1 AND state != 'finished'`,
 			d.MatchID,
 		); err != nil {
 			return err
 		}
 		_, err := c.pool.Exec(ctx,
-			`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
+			`INSERT INTO manager_operation_logs (match_id, actor, action, detail)
 			 VALUES ($1,'game','match_ended',$2)`,
 			d.MatchID,
 			fmt.Sprintf(`{"winner_slot":%d,"wins0":%d,"wins1":%d,"end_reason":"%s"}`,
@@ -199,7 +199,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			rows = append(rows, []any{d.MatchID, ev.Ts, ev.AttackerSlot, ev.VictimSlot, ev.Weapon, ev.Damage, ev.Hitgroup})
 		}
 		_, err := c.pool.CopyFrom(ctx,
-			pgx.Identifier{"mr1v1_combat_event"},
+			pgx.Identifier{"telemetry_combat_events"},
 			[]string{"match_id", "ts", "attacker_slot", "victim_slot", "weapon", "damage", "hitgroup"},
 			pgx.CopyFromRows(rows),
 		)
@@ -218,7 +218,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			rows = append(rows, []any{d.MatchID, ev.Ts, ev.Slot, ev.Weapon, ev.AmmoRemaining})
 		}
 		_, err := c.pool.CopyFrom(ctx,
-			pgx.Identifier{"mr1v1_shoot_event"},
+			pgx.Identifier{"telemetry_shoot_events"},
 			[]string{"match_id", "ts", "slot", "weapon", "ammo_remaining"},
 			pgx.CopyFromRows(rows),
 		)
@@ -237,7 +237,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			rows = append(rows, []any{d.MatchID, ev.Ts, ev.Slot, ev.X, ev.Y, ev.Z, ev.Yaw, ev.Pitch})
 		}
 		_, err := c.pool.CopyFrom(ctx,
-			pgx.Identifier{"mr1v1_position_event"},
+			pgx.Identifier{"telemetry_position_events"},
 			[]string{"match_id", "ts", "slot", "x", "y", "z", "yaw", "pitch"},
 			pgx.CopyFromRows(rows),
 		)
@@ -271,7 +271,7 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 		containersJSON = []byte("[]")
 	}
 	_, err := c.pool.Exec(context.Background(), `
-		INSERT INTO mr1v1_agent
+		INSERT INTO manager_agents
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
 			 status, rehlds_run_max, rehlds_port_range, running_containers, containers_json,
 			 create_time, update_time, heartbeat_time)
@@ -281,14 +281,14 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 			running_containers = EXCLUDED.running_containers,
 			containers_json    = EXCLUDED.containers_json,
 			update_time = CASE
-				WHEN mr1v1_agent.hostname  != EXCLUDED.hostname
-				  OR mr1v1_agent.public_ip != EXCLUDED.public_ip
-				  OR mr1v1_agent.local_ip  != EXCLUDED.local_ip
-				  OR mr1v1_agent.cpu       != EXCLUDED.cpu
-				  OR mr1v1_agent.mem_mb    != EXCLUDED.mem_mb
-				  OR mr1v1_agent.disk_gb   != EXCLUDED.disk_gb
+				WHEN manager_agents.hostname  != EXCLUDED.hostname
+				  OR manager_agents.public_ip != EXCLUDED.public_ip
+				  OR manager_agents.local_ip  != EXCLUDED.local_ip
+				  OR manager_agents.cpu       != EXCLUDED.cpu
+				  OR manager_agents.mem_mb    != EXCLUDED.mem_mb
+				  OR manager_agents.disk_gb   != EXCLUDED.disk_gb
 				THEN NOW()
-				ELSE mr1v1_agent.update_time
+				ELSE manager_agents.update_time
 			END,
 			hostname  = EXCLUDED.hostname,
 			public_ip = EXCLUDED.public_ip,
@@ -297,8 +297,8 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 			mem_mb    = EXCLUDED.mem_mb,
 			disk_gb   = EXCLUDED.disk_gb,
 			rehlds_run_max = CASE
-				WHEN mr1v1_agent.rehlds_run_max = 0 THEN $8
-				ELSE mr1v1_agent.rehlds_run_max
+				WHEN manager_agents.rehlds_run_max = 0 THEN $8
+				ELSE manager_agents.rehlds_run_max
 			END
 	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount, runningContainers, containersJSON)
 	return err

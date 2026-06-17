@@ -115,7 +115,7 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 
 	rows, err := b.pool.Query(ctx, `
 		SELECT match_id, agent_uuid, state
-		FROM mr1v1_match
+		FROM manager_matches
 		WHERE (state = 'waiting'  AND update_time < NOW() - $1 * INTERVAL '1 second')
 		   OR (state = 'playing'  AND update_time < NOW() - $2 * INTERVAL '1 second')
 		   OR (state = 'creating' AND update_time < NOW() - $1 * INTERVAL '1 second')
@@ -148,7 +148,7 @@ func (b *Backend) sweepTimeoutMatches(ctx context.Context) {
 			slog.Error("publish timeout destroy failed", "error", token.Error(), "match_id", m.matchID)
 		}
 		b.pool.Exec(ctx,
-			`UPDATE mr1v1_match SET state='timeout', update_time=NOW() WHERE match_id=$1`, m.matchID)
+			`UPDATE manager_matches SET state='timeout', update_time=NOW() WHERE match_id=$1`, m.matchID)
 		b.writeLog(m.matchID, "platform", "timeout_destroy", map[string]any{
 				"prev_state":   m.state,
 				"agent_uuid":   m.agentUUID,
@@ -213,7 +213,7 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 	case agentproto.StateStopped:
 		// 只有意外停止才标 error；finished/terminated/timeout/error 已是终态不覆盖
 		b.pool.Exec(context.Background(),
-			`UPDATE mr1v1_match SET state='error', update_time=NOW()
+			`UPDATE manager_matches SET state='error', update_time=NOW()
 			 WHERE match_id=$1 AND state NOT IN ('finished','terminated','timeout','error')`,
 			status.MatchID)
 		b.writeLog(status.MatchID, "agent", "container_stopped", status)
@@ -222,7 +222,7 @@ func (b *Backend) onStatus(_ mqtt.Client, msg mqtt.Message) {
 		return
 	}
 	if _, err := b.pool.Exec(context.Background(),
-		`UPDATE mr1v1_match SET state=$1, update_time=NOW() WHERE match_id=$2`,
+		`UPDATE manager_matches SET state=$1, update_time=NOW() WHERE match_id=$2`,
 		newState, status.MatchID,
 	); err != nil {
 		slog.Error("update match state failed", "error", err, "match_id", status.MatchID)
@@ -299,7 +299,7 @@ func (b *Backend) handleCreateMatch(w http.ResponseWriter, r *http.Request) {
 
 	// 写入比赛记录
 	if _, err := b.pool.Exec(ctx, `
-		INSERT INTO mr1v1_match
+		INSERT INTO manager_matches
 			(match_id, p0_steamid, p1_steamid, server_name, agent_uuid, port, image, state)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,'creating')
 	`, matchID, req.P0SteamID, req.P1SteamID, serverName, uuid, port, image); err != nil {
@@ -328,7 +328,7 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 
 	rows, err := b.pool.Query(ctx, `
 		SELECT uuid, public_ip, rehlds_port_range, rehlds_run_max
-		FROM mr1v1_agent
+		FROM manager_agents
 		WHERE status = 'enabled'
 		  AND heartbeat_time > NOW() - $1 * INTERVAL '1 second'
 		  AND rehlds_run_max > 0
@@ -367,7 +367,7 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 
 		// 查该agent当前活跃比赛占用的端口
 		busyRows, err := b.pool.Query(ctx, `
-			SELECT port FROM mr1v1_match
+			SELECT port FROM manager_matches
 			WHERE agent_uuid = $1 AND state IN ('creating','waiting','playing')
 		`, c.uuid)
 		if err != nil {
@@ -414,7 +414,7 @@ func (b *Backend) handleListMatches(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.pool.Query(r.Context(), `
 		SELECT match_id, p0_steamid, p1_steamid, server_name,
 		       agent_uuid, port, image, state, create_time, update_time
-		FROM mr1v1_match
+		FROM manager_matches
 		ORDER BY create_time DESC
 		LIMIT 100
 	`)
@@ -459,7 +459,7 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 
 	var agentUUID string
 	err := b.pool.QueryRow(r.Context(),
-		`SELECT agent_uuid FROM mr1v1_match WHERE match_id=$1`, matchID,
+		`SELECT agent_uuid FROM manager_matches WHERE match_id=$1`, matchID,
 	).Scan(&agentUUID)
 	if err != nil {
 		http.Error(w, "match not found", http.StatusNotFound)
@@ -477,7 +477,7 @@ func (b *Backend) dispatchDestroy(w http.ResponseWriter, r *http.Request, force 
 
 	// 平台主动终止 → terminated（不参与结算），区别于正常 finished 和意外 error
 	b.pool.Exec(r.Context(),
-		`UPDATE mr1v1_match SET state='terminated', update_time=NOW() WHERE match_id=$1`, matchID)
+		`UPDATE manager_matches SET state='terminated', update_time=NOW() WHERE match_id=$1`, matchID)
 
 	action := "end_dispatched"
 	if force {
@@ -506,7 +506,7 @@ func (b *Backend) handleMatchLogs(w http.ResponseWriter, r *http.Request) {
 	matchID := r.PathValue("id")
 	rows, err := b.pool.Query(r.Context(), `
 		SELECT id, match_id, actor, action, detail, created_at
-		FROM mr1v1_operation_log
+		FROM manager_operation_logs
 		WHERE match_id = $1
 		ORDER BY created_at ASC
 	`, matchID)
@@ -541,7 +541,7 @@ func (b *Backend) writeLog(matchID, actor, action string, detail any) {
 		}
 	}
 	if _, err := b.pool.Exec(context.Background(),
-		`INSERT INTO mr1v1_operation_log (match_id, actor, action, detail)
+		`INSERT INTO manager_operation_logs (match_id, actor, action, detail)
 		 VALUES ($1, $2, $3, $4)`,
 		matchID, actor, action, detailStr,
 	); err != nil {
@@ -553,7 +553,7 @@ func (b *Backend) writeLog(matchID, actor, action string, detail any) {
 func (b *Backend) activeRehldsImage(ctx context.Context) (string, error) {
 	var image string
 	err := b.pool.QueryRow(ctx, `
-		SELECT image FROM mr1v1_rehlds_config
+		SELECT image FROM manager_rehlds_configs
 		WHERE is_active = TRUE
 		ORDER BY id DESC LIMIT 1
 	`).Scan(&image)
@@ -585,7 +585,7 @@ func (b *Backend) handleListAgents(w http.ResponseWriter, r *http.Request) {
 		SELECT uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
 		       status, rehlds_run_max, rehlds_port_range, running_containers,
 		       create_time, update_time, heartbeat_time
-		FROM mr1v1_agent
+		FROM manager_agents
 		ORDER BY heartbeat_time DESC
 	`)
 	if err != nil {
@@ -618,7 +618,7 @@ func (b *Backend) handleAgentContainers(w http.ResponseWriter, r *http.Request) 
 	uuid := r.PathValue("uuid")
 	var raw []byte
 	err := b.pool.QueryRow(r.Context(),
-		`SELECT containers_json FROM mr1v1_agent WHERE uuid=$1`, uuid,
+		`SELECT containers_json FROM manager_agents WHERE uuid=$1`, uuid,
 	).Scan(&raw)
 	if err != nil {
 		http.Error(w, "agent not found", http.StatusNotFound)
@@ -669,7 +669,7 @@ func (b *Backend) handleUpdateAgent(w http.ResponseWriter, r *http.Request) {
 	sets = append(sets, "update_time=NOW()")
 	args = append(args, uuid)
 
-	q := fmt.Sprintf("UPDATE mr1v1_agent SET %s WHERE uuid=$%d", strings.Join(sets, ","), n)
+	q := fmt.Sprintf("UPDATE manager_agents SET %s WHERE uuid=$%d", strings.Join(sets, ","), n)
 	if _, err := b.pool.Exec(r.Context(), q, args...); err != nil {
 		slog.Error("update agent failed", "error", err, "uuid", uuid)
 		http.Error(w, "db error", http.StatusInternalServerError)
@@ -688,7 +688,7 @@ type rehldsConfigRow struct {
 
 func (b *Backend) handleListRehldsConfigs(w http.ResponseWriter, r *http.Request) {
 	rows, err := b.pool.Query(r.Context(),
-		`SELECT id, image, version, is_active, create_time FROM mr1v1_rehlds_config ORDER BY id DESC`)
+		`SELECT id, image, version, is_active, create_time FROM manager_rehlds_configs ORDER BY id DESC`)
 	if err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
@@ -723,11 +723,11 @@ func (b *Backend) handleCreateRehldsConfig(w http.ResponseWriter, r *http.Reques
 
 	ctx := r.Context()
 	if req.IsActive {
-		b.pool.Exec(ctx, `UPDATE mr1v1_rehlds_config SET is_active=FALSE`)
+		b.pool.Exec(ctx, `UPDATE manager_rehlds_configs SET is_active=FALSE`)
 	}
 	var id int64
 	err := b.pool.QueryRow(ctx,
-		`INSERT INTO mr1v1_rehlds_config (image, version, is_active) VALUES ($1,$2,$3) RETURNING id`,
+		`INSERT INTO manager_rehlds_configs (image, version, is_active) VALUES ($1,$2,$3) RETURNING id`,
 		req.Image, req.Version, req.IsActive,
 	).Scan(&id)
 	if err != nil {
@@ -745,8 +745,8 @@ func (b *Backend) handleActivateRehldsConfig(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	ctx := r.Context()
-	b.pool.Exec(ctx, `UPDATE mr1v1_rehlds_config SET is_active=FALSE`)
-	if _, err := b.pool.Exec(ctx, `UPDATE mr1v1_rehlds_config SET is_active=TRUE WHERE id=$1`, id); err != nil {
+	b.pool.Exec(ctx, `UPDATE manager_rehlds_configs SET is_active=FALSE`)
+	if _, err := b.pool.Exec(ctx, `UPDATE manager_rehlds_configs SET is_active=TRUE WHERE id=$1`, id); err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)
 		return
 	}
@@ -792,8 +792,8 @@ func (b *Backend) handleMatchServer(w http.ResponseWriter, r *http.Request) {
 	var port int
 	err := b.pool.QueryRow(r.Context(), `
 		SELECT a.public_ip, m.port
-		FROM mr1v1_match m
-		JOIN mr1v1_agent a ON a.uuid = m.agent_uuid
+		FROM manager_matches m
+		JOIN manager_agents a ON a.uuid = m.agent_uuid
 		WHERE m.match_id = $1
 	`, matchID).Scan(&publicIP, &port)
 	if err != nil {

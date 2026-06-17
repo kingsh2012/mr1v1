@@ -17,9 +17,9 @@ services:
       - DB_SSL_MODE=disable
       - DB_TIMEZONE=Asia/Shanghai
 
-  mr1v1-wx:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-wx:0.1.0
-    container_name: mr1v1-wx
+  mr1v1-miniprogram-backend:
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.0
+    container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
     environment:
@@ -27,10 +27,11 @@ services:
       - WX_APP_SECRET=${WX_APP_SECRET}
       - BACKEND_URL=http://127.0.0.1:8181
       - WX_PORT=8082
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
-  mr1v1-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-backend:0.1.11
-    container_name: mr1v1-backend
+  mr1v1-manager-backend:
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.11
+    container_name: mr1v1-manager-backend
     restart: unless-stopped
     network_mode: host
     environment:
@@ -48,3 +49,5 @@ services:
       - AGENT_STALE_SECONDS=30
       - MATCH_WAITING_TIMEOUT_SECONDS=300
       - MATCH_PLAYING_TIMEOUT_SECONDS=900
+      - ADMIN_PASS=${ADMIN_PASS}
+      - INTERNAL_API_KEY=${INTERNAL_API_KEY}

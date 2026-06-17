@@ -39,11 +39,11 @@ services:
       - mosquitto
       - postgres
 
-  backend:
+  manager-backend:
     build:
       context: .
-      dockerfile: ./dockerfile/Dockerfile-backend
-    container_name: mr1v1-backend
+      dockerfile: ./dockerfile/Dockerfile-manager-backend
+    container_name: mr1v1-manager-backend
     restart: unless-stopped
     ports:
       - "8080:8080"
