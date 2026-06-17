@@ -65,6 +65,16 @@ func createRoom(w http.ResponseWriter, r *http.Request, s *store.Store) {
 		return
 	}
 
+	hasRoom, err := s.HasActiveRoom(r.Context(), openid)
+	if err != nil {
+		http.Error(w, "db error", http.StatusInternalServerError)
+		return
+	}
+	if hasRoom {
+		http.Error(w, "already have an active room", http.StatusConflict)
+		return
+	}
+
 	id := uuid.New().String()
 	if err := s.CreateRoom(r.Context(), id, req.Title, openid, req.Password); err != nil {
 		http.Error(w, "db error", http.StatusInternalServerError)

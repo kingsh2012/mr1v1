@@ -129,6 +129,14 @@ type Room struct {
 	Status        string `json:"status"` // waiting|ready|matched
 }
 
+func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {
+	var count int
+	err := s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM wx_rooms WHERE creator_openid = $1 AND status IN ('waiting','ready')
+	`, openid).Scan(&count)
+	return count > 0, err
+}
+
 func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, password string) error {
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO wx_rooms (id, title, creator_openid, password) VALUES ($1, $2, $3, $4)
