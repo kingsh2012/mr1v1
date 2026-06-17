@@ -114,8 +114,17 @@ func RoomActionHandler(s *store.Store, apiPrefix string) http.HandlerFunc {
 }
 
 func joinRoom(w http.ResponseWriter, r *http.Request, s *store.Store, roomID, openid string) {
-	pw, err := s.GetRoomPassword(r.Context(), roomID)
-	if err != nil {
+	rm, err := s.GetRoom(r.Context(), roomID)
+	if err != nil || rm == nil {
+		http.Error(w, "room not found", http.StatusNotFound)
+		return
+	}
+	if rm.CreatorOpenID == openid {
+		http.Error(w, "cannot join your own room", http.StatusForbidden)
+		return
+	}
+	pw, err2 := s.GetRoomPassword(r.Context(), roomID)
+	if err2 != nil {
 		http.Error(w, "room not found", http.StatusNotFound)
 		return
 	}
@@ -136,7 +145,7 @@ func joinRoom(w http.ResponseWriter, r *http.Request, s *store.Store, roomID, op
 		return
 	}
 
-	rm, _ := s.GetRoom(r.Context(), roomID)
+	rm, _ = s.GetRoom(r.Context(), roomID)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(rm)
 }
