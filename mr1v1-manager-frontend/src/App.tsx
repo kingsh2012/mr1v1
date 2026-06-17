@@ -1,20 +1,43 @@
-import { BrowserRouter, Routes, Route, useNavigate } from 'react-router-dom'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom'
 import { Layout, Menu, Button } from 'antd'
-import { RobotOutlined, CloudServerOutlined, TrophyOutlined, LogoutOutlined } from '@ant-design/icons'
-import { useState } from 'react'
+import {
+  RobotOutlined, CloudServerOutlined, TrophyOutlined, LogoutOutlined,
+  HomeOutlined, TeamOutlined, IdcardOutlined,
+} from '@ant-design/icons'
+import type { ReactNode } from 'react'
 import AgentsPage from './pages/AgentsPage'
 import RehldsConfigPage from './pages/RehldsConfigPage'
 import MatchesPage from './pages/MatchesPage'
+import WxRoomsPage from './pages/WxRoomsPage'
+import WxUsersPage from './pages/WxUsersPage'
+import LegacyPlayersPage from './pages/LegacyPlayersPage'
 import LoginPage from './pages/LoginPage'
 import api from './api'
 
 const { Sider, Content, Header } = Layout
 
-type PageKey = 'matches' | 'agents' | 'rehlds'
+interface PageRoute {
+  key: string
+  path: string // 不带前导斜杠，用于内层 <Route path>
+  label: string
+  icon: ReactNode
+  element: ReactNode
+}
+
+const pageRoutes: PageRoute[] = [
+  { key: 'matches', path: 'matches', label: '比赛管理', icon: <TrophyOutlined />, element: <MatchesPage /> },
+  { key: 'agents', path: 'agents', label: 'Agent 管理', icon: <RobotOutlined />, element: <AgentsPage /> },
+  { key: 'rehlds', path: 'rehlds', label: 'Rehlds 镜像', icon: <CloudServerOutlined />, element: <RehldsConfigPage /> },
+  { key: 'wx-rooms', path: 'wx-rooms', label: '房间列表', icon: <HomeOutlined />, element: <WxRoomsPage /> },
+  { key: 'wx-users', path: 'wx-users', label: '微信用户', icon: <TeamOutlined />, element: <WxUsersPage /> },
+  { key: 'legacy-players', path: 'legacy-players', label: '老玩家列表', icon: <IdcardOutlined />, element: <LegacyPlayersPage /> },
+]
 
 function MainLayout() {
-  const [page, setPage] = useState<PageKey>('matches')
   const navigate = useNavigate()
+  const location = useLocation()
+
+  const selectedKey = pageRoutes.find(r => location.pathname === `/${r.path}`)?.key ?? 'matches'
 
   async function logout() {
     await api.post('/auth/logout').catch(() => {})
@@ -30,13 +53,12 @@ function MainLayout() {
         <Menu
           theme="dark"
           mode="inline"
-          selectedKeys={[page]}
-          onClick={({ key }) => setPage(key as PageKey)}
-          items={[
-            { key: 'matches', icon: <TrophyOutlined />, label: '比赛管理' },
-            { key: 'agents', icon: <RobotOutlined />, label: 'Agent 管理' },
-            { key: 'rehlds', icon: <CloudServerOutlined />, label: 'Rehlds 镜像' },
-          ]}
+          selectedKeys={[selectedKey]}
+          onClick={({ key }) => {
+            const target = pageRoutes.find(r => r.key === key)
+            if (target) navigate(`/${target.path}`)
+          }}
+          items={pageRoutes.map(r => ({ key: r.key, icon: r.icon, label: r.label }))}
         />
       </Sider>
       <Layout>
@@ -44,9 +66,11 @@ function MainLayout() {
           <Button icon={<LogoutOutlined />} onClick={logout} type="text">退出登录</Button>
         </Header>
         <Content style={{ padding: 24 }}>
-          {page === 'matches' && <MatchesPage />}
-          {page === 'agents' && <AgentsPage />}
-          {page === 'rehlds' && <RehldsConfigPage />}
+          <Routes>
+            <Route path="/" element={<Navigate to="/matches" replace />} />
+            {pageRoutes.map(r => <Route key={r.key} path={r.path} element={r.element} />)}
+            <Route path="*" element={<Navigate to="/matches" replace />} />
+          </Routes>
         </Content>
       </Layout>
     </Layout>
