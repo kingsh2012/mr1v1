@@ -319,11 +319,12 @@ LoadMatchModeConfig() {
 	g_bMatchModeEnabled = true;
 
 	if (g_bBotTestModeEnabled) {
-		// 不等真人连入，直接用2个专家难度Bot顶替双方slot（仅测试容器会带这个key）
+		// 不等真人连入，直接用2个专家难度Bot顶替双方slot（仅测试容器会带这个key）。
+		// 经StartWithBot()实测bot_quota=N会按队伍各补N个(共2N个)，这里要总共2个Bot，quota设1
 		set_cvar_num("bot_join_after_player", 0);
 		set_cvar_string("bot_quota_mode", "normal");
 		set_cvar_num("bot_difficulty", 3);
-		set_cvar_num("bot_quota", 2);
+		set_cvar_num("bot_quota", 1);
 		log_amx("MR1V1_BOT_TEST_MODE_ENABLED match_id=%s", g_szMatchModeId);
 	} else {
 		set_cvar_num("bot_quota", 0);
