@@ -34,6 +34,11 @@ mr1v1_match_id = $MATCH_ID
 mr1v1_p0_steamid = $P0_STEAMID
 mr1v1_p1_steamid = $P1_STEAMID
 EOF
+  # BOT_TEST_MODE=1：仅供端到端测试容器使用，双方slot由2个Bot顶替，无需真实玩家连入；
+  # 正式排位赛容器不注入此变量，不影响真实比赛的身份校验流程
+  if [ -n "$BOT_TEST_MODE" ]; then
+    echo "mr1v1_bot_test_mode = $BOT_TEST_MODE" >> "$MATCH_MODE_INI"
+  fi
 else
   rm -f "$MATCH_MODE_INI"
 fi

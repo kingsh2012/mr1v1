@@ -262,6 +262,8 @@ type createMatchRequest struct {
 	P0SteamID  string `json:"p0_steamid"`
 	P1SteamID  string `json:"p1_steamid"`
 	ServerName string `json:"server_name"`
+	// BotTestMode 仅供端到端测试使用，见 agentproto.CreateCommand.BotTestMode。
+	BotTestMode bool `json:"bot_test_mode,omitempty"`
 }
 
 type createMatchResponse struct {
@@ -309,12 +311,13 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 	}
 
 	cmd := agentproto.CreateCommand{
-		MatchID:    matchID,
-		ServerName: serverName,
-		Port:       port,
-		P0SteamID:  req.P0SteamID,
-		P1SteamID:  req.P1SteamID,
-		Image:      image,
+		MatchID:     matchID,
+		ServerName:  serverName,
+		Port:        port,
+		P0SteamID:   req.P0SteamID,
+		P1SteamID:   req.P1SteamID,
+		Image:       image,
+		BotTestMode: req.BotTestMode,
 	}
 	payload, _ := json.Marshal(cmd)
 

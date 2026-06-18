@@ -190,6 +190,7 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 		Image:        image,
 		GatewayHTTP:  a.gatewayHTTPAddr(),
 		RCONPassword: rconPassword,
+		BotTestMode:  cmd.BotTestMode,
 	})
 	if err != nil {
 		slog.Error("create match container failed", "error", err, "match_id", cmd.MatchID)

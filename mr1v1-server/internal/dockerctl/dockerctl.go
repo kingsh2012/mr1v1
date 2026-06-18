@@ -61,6 +61,8 @@ type Spec struct {
 	// agent can later RCON into the container to trigger the destroy
 	// countdown (see AGENT_ARCHITECTURE_DESIGN.md section 6).
 	RCONPassword string
+	// BotTestMode 仅供端到端测试使用，见 agentproto.CreateCommand.BotTestMode。
+	BotTestMode bool
 }
 
 func containerName(matchID string) string {
@@ -79,6 +81,9 @@ func (c *Client) CreateAndStart(ctx context.Context, spec Spec) (string, error) 
 		fmt.Sprintf("PORT=%d", spec.Port),
 		"GATEWAY_HTTP=" + spec.GatewayHTTP,
 		"RCON_PASSWORD=" + spec.RCONPassword,
+	}
+	if spec.BotTestMode {
+		env = append(env, "BOT_TEST_MODE=1")
 	}
 
 	if err := c.ensureImage(ctx, spec.Image); err != nil {

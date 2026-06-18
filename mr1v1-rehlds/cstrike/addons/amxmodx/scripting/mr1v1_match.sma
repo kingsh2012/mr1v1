@@ -132,6 +132,9 @@ new g_szMatchModeId[33];
 new g_szMatchModeSteamId[2][35];
 new TeamName:g_eMatchModeTeam[2];
 new bool:g_bMatchModeConnected[2];
+// 比赛模式下的Bot顶替测试：mr1v1_match_mode.ini 额外声明 mr1v1_bot_test_mode=1 时启用，
+// 仅由agent在测试用容器里显式注入，真实排位赛容器不带这个key，行为完全不受影响
+new bool:g_bBotTestModeEnabled;
 new g_iMatchModePlayer[2];
 
 GenerateMatchId() {
@@ -300,6 +303,8 @@ LoadMatchModeConfig() {
 			copy(g_szMatchModeSteamId[0], charsmax(g_szMatchModeSteamId[]), value);
 		} else if (equali(key, "mr1v1_p1_steamid")) {
 			copy(g_szMatchModeSteamId[1], charsmax(g_szMatchModeSteamId[]), value);
+		} else if (equali(key, "mr1v1_bot_test_mode")) {
+			g_bBotTestModeEnabled = (str_to_num(value) != 0);
 		}
 	}
 
@@ -312,7 +317,17 @@ LoadMatchModeConfig() {
 	}
 
 	g_bMatchModeEnabled = true;
-	set_cvar_num("bot_quota", 0);
+
+	if (g_bBotTestModeEnabled) {
+		// 不等真人连入，直接用2个专家难度Bot顶替双方slot（仅测试容器会带这个key）
+		set_cvar_num("bot_join_after_player", 0);
+		set_cvar_string("bot_quota_mode", "normal");
+		set_cvar_num("bot_difficulty", 3);
+		set_cvar_num("bot_quota", 2);
+		log_amx("MR1V1_BOT_TEST_MODE_ENABLED match_id=%s", g_szMatchModeId);
+	} else {
+		set_cvar_num("bot_quota", 0);
+	}
 
 	// 第1局T/CT分边随机决定一次，之后每回合互换沿用既有逻辑(RoundEnd_Post)
 	if (random(2) == 0) {
@@ -1671,6 +1686,26 @@ public client_authorized(id, const authid[]) {
 // 比赛进行中，重连的对战玩家恢复队伍；非对战的第三人强制设为观察者；
 // 比赛模式下、比赛尚未开始前，本局指定玩家自动入座对应阵营，其他人强制观察者
 public client_putinserver(id) {
+	if (g_bMatchModeEnabled && !g_bMatchActive && is_user_bot(id)) {
+		// Bot顶替测试模式：先到的Bot顶替slot0，后到的顶替slot1，无需匹配steamid
+		if (g_bBotTestModeEnabled) {
+			for (new slot = 0; slot < 2; slot++) {
+				if (!g_bMatchModeConnected[slot]) {
+					g_bMatchModeConnected[slot] = true;
+					g_iMatchModePlayer[slot] = id;
+					rg_set_user_team(id, g_eMatchModeTeam[slot], MODEL_AUTO, true, false);
+					log_amx("MR1V1_BOT_TEST_MODE_PLAYER_JOIN slot=%d id=%d", slot, id);
+
+					if (g_bMatchModeConnected[0] && g_bMatchModeConnected[1]) {
+						set_task(1.0, "Task_StartMatchMode");
+					}
+					break;
+				}
+			}
+		}
+		return;
+	}
+
 	if (g_bMatchModeEnabled && !g_bMatchActive && !is_user_bot(id)) {
 		new authid[35];
 		get_user_authid(id, authid, charsmax(authid));

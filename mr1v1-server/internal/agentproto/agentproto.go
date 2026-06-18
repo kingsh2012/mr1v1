@@ -56,6 +56,9 @@ type CreateCommand struct {
 	P0SteamID  string `json:"p0_steamid"`
 	P1SteamID  string `json:"p1_steamid"`
 	Image      string `json:"image"`
+	// BotTestMode 仅供端到端测试使用：为true时双方slot由2个Bot顶替，
+	// 无需真实玩家连入即可走完一整局比赛。正式排位赛不设置此字段。
+	BotTestMode bool `json:"bot_test_mode,omitempty"`
 }
 
 // DestroyCommand 由 backend 下发给指定 agent，指示其销毁一个 rehlds 容器。
