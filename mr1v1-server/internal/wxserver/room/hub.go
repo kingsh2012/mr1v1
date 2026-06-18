@@ -269,6 +269,13 @@ type createMatchResp struct {
 	Port     int    `json:"port"`
 }
 
+// manager-backend 的所有响应统一包了一层 {code, data}（见 internal/resp），
+// 这里是服务间调用，需要按同样的格式解包才能拿到真实数据。
+type createMatchEnvelope struct {
+	Code int              `json:"code"`
+	Data createMatchResp  `json:"data"`
+}
+
 func (h *Hub) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr string, err error) {
 	body, _ := json.Marshal(map[string]string{
 		"p0_steamid": p0SteamID,
@@ -292,9 +299,10 @@ func (h *Hub) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr stri
 		raw, _ := io.ReadAll(resp.Body)
 		return "", "", fmt.Errorf("backend %d: %s", resp.StatusCode, string(raw))
 	}
-	var r createMatchResp
-	if err := json.NewDecoder(resp.Body).Decode(&r); err != nil {
+	var env createMatchEnvelope
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
 		return "", "", err
 	}
+	r := env.Data
 	return r.MatchID, fmt.Sprintf("%s:%d", r.PublicIP, r.Port), nil
 }
