@@ -319,12 +319,10 @@ LoadMatchModeConfig() {
 	g_bMatchModeEnabled = true;
 
 	if (g_bBotTestModeEnabled) {
-		// 不等真人连入，直接用2个专家难度Bot顶替双方slot（仅测试容器会带这个key）。
-		// 经StartWithBot()实测bot_quota=N会按队伍各补N个(共2N个)，这里要总共2个Bot，quota设1
-		set_cvar_num("bot_join_after_player", 0);
-		set_cvar_string("bot_quota_mode", "normal");
-		set_cvar_num("bot_difficulty", 3);
-		set_cvar_num("bot_quota", 1);
+		// LoadMatchModeConfig()在plugin_init阶段执行，此时server.cfg还没跑完、
+		// 服务器尚未完全起来，直接设bot_quota会导致引擎提前补Bot失败
+		// (ReAPI报"player is not connected"再被引擎按quota踢掉)，延迟到Task里设置
+		set_task(3.0, "Task_EnableBotTestMode");
 		log_amx("MR1V1_BOT_TEST_MODE_ENABLED match_id=%s", g_szMatchModeId);
 	} else {
 		set_cvar_num("bot_quota", 0);
@@ -1638,6 +1636,15 @@ public Task_AbortIfNoReconnect(slotPlus) {
 	}
 }
 
+// Bot顶替测试模式：服务器完全起来(server.cfg跑完)之后才设bot_quota，
+// 让引擎补Bot；补出的Bot在client_putinserver里顶替双方slot(见该函数)
+public Task_EnableBotTestMode() {
+	set_cvar_num("bot_join_after_player", 0);
+	set_cvar_string("bot_quota_mode", "normal");
+	set_cvar_num("bot_difficulty", 3);
+	set_cvar_num("bot_quota", 2);
+}
+
 // 比赛模式：本局指定的双方玩家均已连入并入座对应阵营，自动进入热身->开局
 public Task_StartMatchMode() {
 	if (g_bMatchActive) {
@@ -1690,11 +1697,13 @@ public client_putinserver(id) {
 	if (g_bMatchModeEnabled && !g_bMatchActive && is_user_bot(id)) {
 		// Bot顶替测试模式：先到的Bot顶替slot0，后到的顶替slot1，无需匹配steamid
 		if (g_bBotTestModeEnabled) {
+			// 此时ReAPI对该Bot的内部"已连接"状态可能还没就绪，rg_set_user_team
+			// 会报"player is not connected"；team由SelectMatchModePlayers()
+			// 在Task_StartMatchMode之后统一设置，这里只记录slot绑定
 			for (new slot = 0; slot < 2; slot++) {
 				if (!g_bMatchModeConnected[slot]) {
 					g_bMatchModeConnected[slot] = true;
 					g_iMatchModePlayer[slot] = id;
-					rg_set_user_team(id, g_eMatchModeTeam[slot], MODEL_AUTO, true, false);
 					log_amx("MR1V1_BOT_TEST_MODE_PLAYER_JOIN slot=%d id=%d", slot, id);
 
 					if (g_bMatchModeConnected[0] && g_bMatchModeConnected[1]) {
