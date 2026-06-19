@@ -213,4 +213,7 @@ body为统一信封：
 ## 备注
 
 - **Bot唯一ID**：Bot的 `get_user_authid` 固定返回 `"BOT"`，插件会替换为 `BOT_<userid>_<6位随机数>` 格式作为 `authid` 上报，避免多场Bot对局在数据库里authid冲突。
-- **消费端适配状态**：以上事件类型目前PROCS.PRO-REHLDS-COLLECTION-SYSTEM的consumer尚未识别（switch落入`default`分支被丢弃），数据还未真正落库，需要后续适配（新增`pkg/mes`结构体 + consumer的case分支 + 表注册，详见讨论记录）。
+- **消费端适配状态**：mr1v1-server的consumer已全部适配（`internal/consumer/consumer.go`），6种事件分别落入
+  `telemetry_match_starts` / `telemetry_round_ends` / `telemetry_match_ends` / `telemetry_combat_events` /
+  `telemetry_shoot_events` / `telemetry_position_events`，已通过`bot_test_mode`端到端测试验证全部正常落库
+  （详见[E2E_BOT_TEST.md](./E2E_BOT_TEST.md)）。
