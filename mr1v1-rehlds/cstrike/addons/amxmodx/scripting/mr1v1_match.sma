@@ -1325,7 +1325,9 @@ public RoundEnd_Post(WinStatus:status, ScenarioEventEndRound:event) {
 
 	if (g_iRoundNum >= TOTAL_ROUNDS || g_iWins[0] >= WIN_THRESHOLD || g_iWins[1] >= WIN_THRESHOLD) {
 		UpdateNativeTeamScores();
-		AnnounceMatchResult();
+		// 比Task_RoundDamage(0.3s)晚0.1秒执行，确保决胜局伤害先上报完，
+		// 清理动作(ResetMatchState清空g_iPlayer/踢Bot)再发生，见Task_AnnounceMatchResult注释
+		set_task(0.4, "Task_AnnounceMatchResult");
 		return HC_CONTINUE;
 	}
 
@@ -1448,7 +1450,12 @@ ShowScore() {
 	ShowSyncHudMsg(0, g_hudSync, "第%d/%d回合 %s %d:%d %s", g_iRoundNum, TOTAL_ROUNDS, name1, g_iWins[0], g_iWins[1], name2);
 }
 
-AnnounceMatchResult() {
+// 比0.3秒后执行的Task_RoundDamage晚0.1秒触发，确保决胜局的伤害/命中明细
+// 先上报完，再执行本函数里的ResetMatchState()(会清空g_iPlayer/踢Bot)——
+// 否则Task_RoundDamage执行时g_iPlayer已被清零，guard直接return，
+// 决胜局的round_end遥测会永久丢失（比分本身不受影响，因为走的是
+// ReportMatchEnd另一条不依赖g_iPlayer的独立上报路径）
+public Task_AnnounceMatchResult() {
 	new name1[32], name2[32];
 	get_user_name(g_iPlayer[0], name1, charsmax(name1));
 	get_user_name(g_iPlayer[1], name2, charsmax(name2));
@@ -1533,7 +1540,7 @@ AbortMatch(const reason[], const endReason[]) {
 }
 
 // 清空比分/回合/阶段/武器选择等比赛状态，移除比赛Bot，并刷新当前地图（不换图）
-// 比赛正常结束(AnnounceMatchResult)和被中止(.stop/AbortMatch)后共用
+// 比赛正常结束(Task_AnnounceMatchResult)和被中止(.stop/AbortMatch)后共用
 ResetMatchState() {
 	arrayset(g_iWeaponChoice[g_iPlayer[0]], 0, 3);
 	arrayset(g_iWeaponChoice[g_iPlayer[1]], 0, 3);
