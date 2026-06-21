@@ -38,6 +38,9 @@ func main() {
 	r := gin.New()
 	r.Use(gin.Logger(), gin.Recovery())
 	r.Use(handlers.CORS())
+	// nginx只转发了/api/wx/和/ws/wx/这两个前缀到本服务，静态文件也挂在/api/wx/下面，
+	// 不用额外改生产环境的反代配置
+	r.Static("/api/wx/static/avatars", cfg.AvatarsDir)
 
 	wx := r.Group("/api/wx")
 	wx.POST("/login", handlers.Login(cfg, s))
@@ -49,6 +52,7 @@ func main() {
 	auth.GET("/user", handlers.GetUser(s))
 	auth.POST("/user", handlers.UpdateSteamID(s))
 	auth.PATCH("/user", handlers.UpdateProfile(s))
+	auth.POST("/avatar", handlers.UploadAvatar(cfg.AvatarsDir, cfg.PublicURL))
 	auth.POST("/rooms", handlers.CreateRoom(s))
 	auth.POST("/rooms/:id/join", handlers.JoinRoom(s))
 	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s, mgr))

@@ -13,6 +13,8 @@ type WxConfig struct {
 	DatabaseURL      string // PostgreSQL DSN
 	InternalAPIKey   string // 与 backend 共享的内部调用 key
 	RoomStaleMinutes int    // 房间无状态变化且无人在线超过此时长，自动软删除
+	AvatarsDir       string // 上传头像落盘目录
+	PublicURL        string // 外部可访问的本服务域名，用于拼出头像的永久URL
 }
 
 func LoadWx() *WxConfig {
@@ -24,6 +26,8 @@ func LoadWx() *WxConfig {
 		DatabaseURL:      getEnv("DATABASE_URL", ""),
 		InternalAPIKey:   getEnv("INTERNAL_API_KEY", ""),
 		RoomStaleMinutes: getEnvInt("ROOM_STALE_MINUTES", 30),
+		AvatarsDir:       getEnv("AVATARS_DIR", "./data/avatars"),
+		PublicURL:        getEnv("WX_PUBLIC_URL", "https://mr1v1.smarteamlab.com"),
 	}
 }
 

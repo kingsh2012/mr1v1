@@ -20,10 +20,12 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
   mr1v1-miniprogram-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.12
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.13
     container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
+    volumes:
+      - /opt/mr1v1-avatars:/data/avatars
     environment:
       - WX_APP_ID=wx04b9f2b8ddbd9fcf
       - WX_APP_SECRET=${WX_APP_SECRET}
@@ -31,6 +33,8 @@ services:
       - WX_PORT=8082
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
       - DATABASE_URL=${DATABASE_URL}
+      - AVATARS_DIR=/data/avatars
+      - WX_PUBLIC_URL=https://mr1v1.smarteamlab.com
 
   mr1v1-manager-backend:
     image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.19
