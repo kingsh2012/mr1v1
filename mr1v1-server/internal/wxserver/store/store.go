@@ -7,6 +7,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"mr1v1-server/internal/wxserver/namegen"
 )
 
 // ErrRoomNotJoinable 表示房间已经不满足"可加入"条件（已被别人抢先加入/已满/已删除）。
@@ -90,12 +91,13 @@ func (s *Store) GetOpenIDByToken(ctx context.Context, token string) (string, boo
 	return openid, true
 }
 
-// UpsertUser 登录时建档，已存在则仅更新 updated_at
+// UpsertUser 登录时建档，已存在则仅更新updated_at（不会覆盖已有nickname，
+// 包括用户后来自己改过的）。首次建档时给一个随机中文昵称，新用户不至于显示空白。
 func (s *Store) UpsertUser(ctx context.Context, openid string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO wx_users (openid) VALUES ($1)
+		INSERT INTO wx_users (openid, nickname) VALUES ($1, $2)
 		ON CONFLICT (openid) DO UPDATE SET updated_at = now()
-	`, openid)
+	`, openid, namegen.Generate())
 	return err
 }
 
@@ -136,7 +138,7 @@ type Room struct {
 	JoinerName    string `json:"joiner_name,omitempty"`
 	JoinerAvatar  string `json:"joiner_avatar,omitempty"`
 	Locked        bool   `json:"locked"`
-	Status        string `json:"status"` // waiting|ready|matched
+	Status        string `json:"status"`            // waiting|ready|matched
 	IsMine        bool   `json:"is_mine,omitempty"` // 仅ListRooms根据当前登录用户算出来，游客/未关联到则为false
 }
 
