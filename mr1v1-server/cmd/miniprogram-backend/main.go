@@ -47,6 +47,9 @@ func main() {
 	wx.GET("/legacy-players/search", handlers.SearchLegacyPlayers(s))
 	// 房间列表不强制登录：游客也能看到有哪些房间可以玩，点进去加入/创建时才要求登录
 	wx.GET("/rooms", handlers.OptionalAuth(s), handlers.ListRooms(s))
+	// 随机昵称+头像预览("骰子"按钮用)和头像图片本身都不需要登录，纯生成/渲染，不读用户数据
+	wx.GET("/random-profile", handlers.RandomProfile(cfg))
+	wx.GET("/identicon/:seed", handlers.Identicon)
 
 	auth := wx.Group("", handlers.Auth(s))
 	auth.GET("/user", handlers.GetUser(s))

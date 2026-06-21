@@ -11,8 +11,29 @@ import (
 	"github.com/google/uuid"
 	"mr1v1-server/internal/resp"
 	"mr1v1-server/internal/wxserver/config"
+	"mr1v1-server/internal/wxserver/identicon"
+	"mr1v1-server/internal/wxserver/namegen"
 	"mr1v1-server/internal/wxserver/store"
 )
+
+// RandomProfile 给小程序"骰子"按钮用：每次随机生成一对昵称+对应头像URL供预览，
+// 不落库，用户点保存才会真正写进数据库（跟UpdateProfile走的是同一个接口）。
+func RandomProfile(cfg *config.WxConfig) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		nickname := namegen.Generate()
+		resp.OK(c, gin.H{
+			"nickname":   nickname,
+			"avatar_url": namegen.AvatarURL(cfg.PublicURL, nickname),
+		})
+	}
+}
+
+// Identicon 根据seed（一般是昵称）确定性渲染一张几何图案头像，本机生成不依赖任何
+// 外部图床服务（gravatar.com在国内经常连不上，所以没有走它）。
+func Identicon(c *gin.Context) {
+	seed := c.Param("seed")
+	c.Data(http.StatusOK, "image/png", identicon.PNG(seed))
+}
 
 func Login(cfg *config.WxConfig, s *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
@@ -30,7 +51,7 @@ func Login(cfg *config.WxConfig, s *store.Store) gin.HandlerFunc {
 			return
 		}
 
-		if err := s.UpsertUser(c.Request.Context(), openid); err != nil {
+		if err := s.UpsertUser(c.Request.Context(), openid, cfg.PublicURL); err != nil {
 			slog.Warn("upsert wx_user failed", "openid", openid, "err", err)
 			resp.Fail(c, 500, "db error")
 			return

@@ -100,13 +100,16 @@ func (s *Store) GetOpenIDByToken(ctx context.Context, token string) (string, boo
 	return openid, true
 }
 
-// UpsertUser 登录时建档，已存在则仅更新updated_at（不会覆盖已有nickname，
-// 包括用户后来自己改过的）。首次建档时给一个随机中文昵称，新用户不至于显示空白。
-func (s *Store) UpsertUser(ctx context.Context, openid string) error {
+// UpsertUser 登录时建档，已存在则仅更新updated_at（不会覆盖已有nickname/avatar_url，
+// 包括用户后来自己改过的）。首次建档时给一个随机中文昵称+对应的随机头像，
+// 新用户不至于显示空白。publicURL用来拼出头像的完整外部可访问URL。
+func (s *Store) UpsertUser(ctx context.Context, openid, publicURL string) error {
+	nickname := namegen.Generate()
+	avatarURL := namegen.AvatarURL(publicURL, nickname)
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO wx_users (openid, nickname) VALUES ($1, $2)
+		INSERT INTO wx_users (openid, nickname, avatar_url) VALUES ($1, $2, $3)
 		ON CONFLICT (openid) DO UPDATE SET updated_at = now()
-	`, openid, namegen.Generate())
+	`, openid, nickname, avatarURL)
 	return err
 }
 

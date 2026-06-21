@@ -5,6 +5,8 @@ package namegen
 import (
 	"fmt"
 	"math/rand"
+	"net/url"
+	"strings"
 )
 
 var adjectives = []string{
@@ -25,4 +27,10 @@ func Generate() string {
 	n := nouns[rand.Intn(len(nouns))]
 	num := rand.Intn(9000) + 1000
 	return fmt.Sprintf("%s%s%d", a, n, num)
+}
+
+// AvatarURL 拼出nickname对应的identicon头像URL（同一个nickname永远生成同一张图，
+// 由identicon包按seed确定性渲染，不依赖任何外部图床/服务）。
+func AvatarURL(publicURL, nickname string) string {
+	return strings.TrimRight(publicURL, "/") + "/api/wx/identicon/" + url.PathEscape(nickname)
 }
