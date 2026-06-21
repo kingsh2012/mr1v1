@@ -73,7 +73,8 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 	if role == "joiner" {
 		idx = 1
 	}
-	h.slots[idx] = &slot{openid: openid, name: name, avatar: avatar, steamID: steamID, role: role, conn: conn}
+	mySlot := &slot{openid: openid, name: name, avatar: avatar, steamID: steamID, role: role, conn: conn}
+	h.slots[idx] = mySlot
 	other := h.slots[1-idx]
 	history := append([]Event(nil), h.history...)
 	matched, matchID, serverAddr := h.matched, h.matchID, h.serverAddr
@@ -143,9 +144,20 @@ readLoop:
 
 	// disconnected（主动关闭或断线）
 	h.mu.Lock()
-	h.slots[idx] = nil
+	// 这个连接可能早就被同一角色的新连接(重连)顶替了——slots[idx]当前已经不是
+	// 自己创建的那个slot对象，说明自己只是个迟迟才发现断开的"僵尸"读循环，
+	// 不能清空别人的slot，也不能再广播一次player_left（否则就是这次复现的bug：
+	// 房主重连后，旧连接才超时断开，把新连接的slot顶掉并误报"对手离开"）
+	stale := h.slots[idx] != mySlot
+	if !stale {
+		h.slots[idx] = nil
+	}
 	remaining := h.slots[1-idx]
 	h.mu.Unlock()
+
+	if stale {
+		return
+	}
 
 	h.mu.Lock()
 	alreadyMatched := h.matched
