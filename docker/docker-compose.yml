@@ -20,7 +20,7 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
   mr1v1-miniprogram-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.13
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.14
     container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
@@ -37,7 +37,7 @@ services:
       - WX_PUBLIC_URL=https://mr1v1.smarteamlab.com
 
   mr1v1-manager-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.19
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-manager-backend:0.1.20
     container_name: mr1v1-manager-backend
     restart: unless-stopped
     network_mode: host
