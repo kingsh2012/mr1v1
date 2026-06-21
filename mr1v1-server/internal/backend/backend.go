@@ -349,7 +349,9 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 
 // pickAgentPort 从PG查询一个可用agent并分配端口。
 // agent可用条件：status='enabled'，心跳在stale阈值内，rehlds_run_max>0，
-// rehlds_port_range格式"start-end"，且有空闲端口。
+// rehlds_port_range格式"start-end"（为空表示agent尚未初始化完成，不参与调度）。
+// 多个agent都有空闲容量时，按"当前在跑比赛数 / rehlds_run_max"负载占比从低到高选，
+// 而不是固定优先用心跳最新的那个——避免出现一台agent被打满、其他agent完全空闲的不均衡情况。
 func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, port int, err error) {
 	stale := b.cfg.AgentStaleSeconds
 	if stale <= 0 {
@@ -363,7 +365,6 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 		  AND heartbeat_at > NOW() - $1 * INTERVAL '1 second'
 		  AND rehlds_run_max > 0
 		  AND rehlds_port_range != ''
-		ORDER BY heartbeat_at DESC
 	`, stale)
 	if err != nil {
 		return "", "", 0, err
@@ -388,7 +389,16 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 		return "", "", 0, fmt.Errorf("no available agent")
 	}
 
-	// 查各候选agent正在运行的容器端口
+	type option struct {
+		uuid      string
+		publicIP  string
+		available []int
+		busyCount int
+		runMax    int
+	}
+	var best *option
+	var bestLoad float64
+
 	for _, c := range candidates {
 		var start, end int
 		if _, err := fmt.Sscanf(c.portRange, "%d-%d", &start, &end); err != nil {
@@ -421,10 +431,19 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 		if len(available) == 0 || len(busy) >= c.runMax {
 			continue
 		}
-		mathrand.Shuffle(len(available), func(i, j int) { available[i], available[j] = available[j], available[i] })
-		return c.uuid, c.publicIP, available[0], nil
+
+		load := float64(len(busy)) / float64(c.runMax)
+		if best == nil || load < bestLoad {
+			best = &option{uuid: c.uuid, publicIP: c.publicIP, available: available, busyCount: len(busy), runMax: c.runMax}
+			bestLoad = load
+		}
 	}
-	return "", "", 0, fmt.Errorf("all agents are at capacity")
+
+	if best == nil {
+		return "", "", 0, fmt.Errorf("all agents are at capacity")
+	}
+	mathrand.Shuffle(len(best.available), func(i, j int) { best.available[i], best.available[j] = best.available[j], best.available[i] })
+	return best.uuid, best.publicIP, best.available[0], nil
 }
 
 type matchRow struct {

@@ -1,0 +1,20 @@
+services:
+  mr1v1-agent:
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent:0.1.7
+    container_name: mr1v1-agent
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - HTTP_LISTEN=0.0.0.0:7778
+      - MQTT_BROKER=tcp://emqx.smarteamlab.com:1883
+      - MQTT_USER=agent
+      - MQTT_PASS=agent
+      - QUEUE_CAPACITY=10000
+      - HEARTBEAT_INTERVAL=10
+      - PUBLIC_IP=39.97.243.248
+      - DOCKER_STOP_TIMEOUT=15
+      - DESTROY_COMMAND=mr1v1_match_destroy
+      - DESTROY_COUNTDOWN=5
+      - DOCKER_IMAGE=registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.2.12
