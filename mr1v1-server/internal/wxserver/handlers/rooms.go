@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"net/http"
 	"strings"
 
@@ -95,6 +96,12 @@ func JoinRoom(s *store.Store) gin.HandlerFunc {
 		}
 
 		if err := s.JoinRoom(c.Request.Context(), roomID, oid); err != nil {
+			if errors.Is(err, store.ErrRoomNotJoinable) {
+				// 并发竞态：在密码校验和这次UPDATE之间，房间已经被别人抢先加入/状态变了，
+				// 不能当成功处理——之前这里没检查RowsAffected，会把"没抢到"误报成"加入成功"
+				resp.Fail(c, 409, "room already taken")
+				return
+			}
 			resp.Fail(c, 500, "db error")
 			return
 		}

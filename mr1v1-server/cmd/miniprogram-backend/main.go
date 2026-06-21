@@ -8,7 +8,6 @@ import (
 	"github.com/gin-gonic/gin"
 	wxconfig "mr1v1-server/internal/wxserver/config"
 	"mr1v1-server/internal/wxserver/handlers"
-	"mr1v1-server/internal/wxserver/matchmaker"
 	"mr1v1-server/internal/wxserver/room"
 	"mr1v1-server/internal/wxserver/store"
 )
@@ -32,7 +31,6 @@ func main() {
 	}
 	slog.Info("store connected and migrated")
 
-	mm := matchmaker.New(cfg.BackendURL, cfg.InternalAPIKey)
 	mgr := room.NewManager(cfg.BackendURL, cfg.InternalAPIKey, s)
 
 	go sweepStaleRooms(ctx, s, mgr, time.Duration(cfg.RoomStaleMinutes)*time.Minute)
@@ -57,7 +55,6 @@ func main() {
 
 	ws := r.Group("/ws/wx")
 	ws.GET("/room/:id", handlers.RoomWS(s, mgr))
-	ws.GET("/matchmaking", handlers.Matchmaking(mm, s))
 
 	internal := r.Group("/api/wx/internal", handlers.InternalAuth(cfg.InternalAPIKey))
 	internal.POST("/match-ended", handlers.MatchEnded(s, mgr))

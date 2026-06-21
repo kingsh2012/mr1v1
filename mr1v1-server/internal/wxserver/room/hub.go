@@ -16,14 +16,19 @@ import (
 )
 
 type Event struct {
-	Type       string `json:"type"`
-	Content    string `json:"content,omitempty"`
-	Role       string `json:"role,omitempty"`
-	Name       string `json:"name,omitempty"`
-	Avatar     string `json:"avatar,omitempty"`
-	ServerAddr string `json:"server_addr,omitempty"`
-	MatchID    string `json:"match_id,omitempty"`
-	Message    string `json:"message,omitempty"`
+	Type           string `json:"type"`
+	Content        string `json:"content,omitempty"`
+	Role           string `json:"role,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Avatar         string `json:"avatar,omitempty"`
+	ServerAddr     string `json:"server_addr,omitempty"`
+	MatchID        string `json:"match_id,omitempty"`
+	Message        string `json:"message,omitempty"`
+	// 仅"state"事件使用：(re)连接时把Hub内存里的当前状态告知刚连上的客户端，
+	// 弥补WS协议本身只推送"变化"、新连接/重连进来时两眼一抹黑的问题
+	OtherOnline    bool   `json:"other_online,omitempty"`
+	OtherConfirmed bool   `json:"other_confirmed,omitempty"`
+	MyConfirmed    bool   `json:"my_confirmed,omitempty"`
 }
 
 type slot struct {
@@ -45,6 +50,9 @@ type Hub struct {
 	slots          [2]*slot // 0=creator, 1=joiner
 	history        []Event  // chat history
 	onEmpty        func()   // called when both slots are disconnected
+	matched        bool     // 本房间是否已经成功建服(供重连客户端补发matched事件)
+	matchID        string
+	serverAddr     string
 }
 
 func newHub(roomID, backendURL, internalAPIKey string, s *store.Store, onEmpty func()) *Hub {
@@ -68,6 +76,7 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 	h.slots[idx] = &slot{openid: openid, name: name, avatar: avatar, steamID: steamID, role: role, conn: conn}
 	other := h.slots[1-idx]
 	history := append([]Event(nil), h.history...)
+	matched, matchID, serverAddr := h.matched, h.matchID, h.serverAddr
 	h.mu.Unlock()
 
 	// send chat history to reconnecting player
@@ -76,6 +85,20 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 			data, _ := json.Marshal(history)
 			return string(data)
 		}()})
+	}
+
+	// (重)连接时把当前已知状态告知这个客户端本身——WS协议本身只推送"变化"，
+	// 新连接/掉线重连进来时两眼一抹黑，靠这条把对手在线/确认状态补回去
+	h.send(conn, Event{
+		Type:           "state",
+		OtherOnline:    other != nil,
+		OtherConfirmed: other != nil && other.confirmed,
+		MyConfirmed:    false, // 每次(re)连接都会创建新slot，确认状态需要重新确认一次，这里显式回传false避免前端误用旧值
+	})
+
+	// 如果重连发生在比赛已经建好之后(原来的matched广播错过了)，直接补发一次
+	if matched {
+		h.send(conn, Event{Type: "matched", ServerAddr: serverAddr, MatchID: matchID})
 	}
 
 	// notify the other player that someone joined/is-present
@@ -120,7 +143,15 @@ readLoop:
 	remaining := h.slots[1-idx]
 	h.mu.Unlock()
 
+	h.mu.Lock()
+	alreadyMatched := h.matched
+	h.mu.Unlock()
+
 	switch {
+	case alreadyMatched:
+		// 比赛已经建好之后的断开（无论房主/joiner）：双方本来就该去连游戏服务器了，
+		// 不做任何房间状态变更——尤其不能把joiner清空/把房间打回waiting，
+		// 否则会跟"已经matched"的事实自相矛盾，且match_ended会负责后续的真正收尾
 	case role == "creator" && explicitClose:
 		// 房主主动点击"关闭房间" → 软删除并踢出对手
 		_ = h.store.DeleteRoom(context.Background(), h.roomID)
@@ -134,7 +165,7 @@ readLoop:
 			h.send(remaining.conn, Event{Type: "player_left", Role: "creator", Name: name})
 		}
 	default:
-		// joiner 离开（主动或断线一视同仁）→ 清空 joiner，房间回到 waiting
+		// joiner 离开（主动或断线一视同仁，且尚未matched）→ 清空 joiner，房间回到 waiting
 		_ = h.store.LeaveRoom(context.Background(), h.roomID, openid)
 		if remaining != nil {
 			h.send(remaining.conn, Event{Type: "player_left", Role: "joiner", Name: name})
@@ -196,6 +227,12 @@ func (h *Hub) triggerMatch(creator, joiner *slot) {
 		h.mu.Unlock()
 		return
 	}
+
+	h.mu.Lock()
+	h.matched = true
+	h.matchID = matchID
+	h.serverAddr = serverAddr
+	h.mu.Unlock()
 
 	_ = h.store.SetRoomMatched(context.Background(), h.roomID, matchID, serverAddr)
 	h.broadcast(Event{Type: "matched", ServerAddr: serverAddr, MatchID: matchID})

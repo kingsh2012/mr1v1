@@ -2,11 +2,17 @@ package store
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
+
+// ErrRoomNotJoinable 表示房间已经不满足"可加入"条件（已被别人抢先加入/已满/已删除）。
+// JoinRoom 的 UPDATE 靠 WHERE 条件保证数据库层面只有一个并发请求能真正生效，
+// 但调用方必须检查 RowsAffected，否则没抢到的请求会被误判成功。
+var ErrRoomNotJoinable = errors.New("room not joinable")
 
 type User struct {
 	OpenID    string
@@ -229,11 +235,19 @@ func (s *Store) GetRoomPassword(ctx context.Context, id string) (string, error) 
 }
 
 func (s *Store) JoinRoom(ctx context.Context, id, joinerOpenID string) error {
-	_, err := s.pool.Exec(ctx, `
+	tag, err := s.pool.Exec(ctx, `
 		UPDATE wx_rooms SET joiner_openid = $2, status = 'ready', updated_at = now()
 		WHERE id = $1 AND joiner_openid IS NULL AND status = 'waiting' AND deleted_at IS NULL
 	`, id, joinerOpenID)
-	return err
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		// WHERE条件没匹配到任何行：房间已经被别人抢先加入/状态已变化，
+		// 而不是真的加入成功——调用方之前没检查这个，会把"没抢到"误报成"加入成功"
+		return ErrRoomNotJoinable
+	}
+	return nil
 }
 
 // LeaveRoom 仅处理 joiner 离开（清空 joiner，回到 waiting）。

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -63,7 +64,7 @@ func fetchOpenID(cfg *config.WxConfig, code string) (string, error) {
 		ErrMsg  string `json:"errmsg"`
 		ErrCode int    `json:"errcode"`
 	}
-	if err := unmarshalJSON(body, &result); err != nil {
+	if err := json.Unmarshal(body, &result); err != nil {
 		return "", err
 	}
 	if result.OpenID == "" {
