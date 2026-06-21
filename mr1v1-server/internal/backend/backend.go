@@ -203,6 +203,7 @@ func (b *Backend) Handler(prefix string) http.Handler {
 	// 小程序侧数据只读查看（房间/微信用户/老玩家）
 	api.GET("/wx-rooms", b.handleListWxRooms)
 	api.GET("/wx-users", b.handleListWxUsers)
+	api.PATCH("/wx-users/:openid", b.handleUpdateWxUser)
 	api.DELETE("/wx-users/:openid", b.handleDeleteWxUser)
 	api.GET("/legacy-players", b.handleListLegacyPlayers)
 
@@ -880,13 +881,14 @@ type wxUserRow struct {
 	SteamID   string    `json:"steam_id"`
 	Nickname  string    `json:"nickname"`
 	AvatarURL string    `json:"avatar_url"`
+	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
 func (b *Backend) handleListWxUsers(c *gin.Context) {
 	rows, err := b.pool.Query(c.Request.Context(), `
-		SELECT openid, steam_id, nickname, avatar_url, created_at, updated_at
+		SELECT openid, steam_id, nickname, avatar_url, status, created_at, updated_at
 		FROM wx_users
 		ORDER BY created_at DESC
 		LIMIT 200
@@ -900,7 +902,7 @@ func (b *Backend) handleListWxUsers(c *gin.Context) {
 	var result []wxUserRow
 	for rows.Next() {
 		var u wxUserRow
-		if err := rows.Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL, &u.CreatedAt, &u.UpdatedAt); err != nil {
+		if err := rows.Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL, &u.Status, &u.CreatedAt, &u.UpdatedAt); err != nil {
 			continue
 		}
 		result = append(result, u)
@@ -909,6 +911,66 @@ func (b *Backend) handleListWxUsers(c *gin.Context) {
 		result = []wxUserRow{}
 	}
 	resp.OK(c, result)
+}
+
+// handleUpdateWxUser 编辑微信用户：昵称/头像/SteamID/启用状态，都是可选字段，
+// 传了哪个就改哪个。status传"disabled"即视为拉黑——该用户已签发的session立刻失效
+// (ResolveSession会查到disabled直接拒绝)，新登录也会在Login里被卡住。
+func (b *Backend) handleUpdateWxUser(c *gin.Context) {
+	openid := c.Param("openid")
+	var req struct {
+		Status    *string `json:"status"`
+		SteamID   *string `json:"steam_id"`
+		Nickname  *string `json:"nickname"`
+		AvatarURL *string `json:"avatar_url"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		resp.Fail(c, 400, "invalid json")
+		return
+	}
+
+	sets := []string{}
+	args := []any{}
+	n := 1
+	if req.Status != nil {
+		sets = append(sets, fmt.Sprintf("status=$%d", n))
+		args = append(args, *req.Status)
+		n++
+	}
+	if req.SteamID != nil {
+		sets = append(sets, fmt.Sprintf("steam_id=$%d", n))
+		args = append(args, *req.SteamID)
+		n++
+	}
+	if req.Nickname != nil {
+		sets = append(sets, fmt.Sprintf("nickname=$%d", n))
+		args = append(args, *req.Nickname)
+		n++
+	}
+	if req.AvatarURL != nil {
+		sets = append(sets, fmt.Sprintf("avatar_url=$%d", n))
+		args = append(args, *req.AvatarURL)
+		n++
+	}
+	if len(sets) == 0 {
+		resp.Fail(c, 400, "nothing to update")
+		return
+	}
+	sets = append(sets, "updated_at=NOW()")
+	args = append(args, openid)
+
+	q := fmt.Sprintf("UPDATE wx_users SET %s WHERE openid=$%d", strings.Join(sets, ","), n)
+	tag, err := b.pool.Exec(c.Request.Context(), q, args...)
+	if err != nil {
+		slog.Error("update wx_user failed", "error", err, "openid", openid)
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		resp.Fail(c, 404, "user not found")
+		return
+	}
+	resp.OK(c, gin.H{"status": "ok"})
 }
 
 // handleDeleteWxUser 删除一个微信用户。wx_rooms.creator_openid是NOT NULL外键，

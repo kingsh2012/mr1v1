@@ -36,6 +36,14 @@ func Login(cfg *config.WxConfig, s *store.Store) gin.HandlerFunc {
 			return
 		}
 
+		// 被禁用的账号不让登录成功（UpsertUser的ON CONFLICT分支不会动status，
+		// 被封的账号每次登录都会卡在这里），给个能让前端区分出来的明确提示
+		u, err := s.GetUser(c.Request.Context(), openid)
+		if err == nil && u != nil && u.Status != "enabled" {
+			resp.Fail(c, 403, "account_disabled")
+			return
+		}
+
 		token := uuid.New().String()
 		if err := s.CreateSession(c.Request.Context(), token, openid); err != nil {
 			slog.Warn("create session failed", "err", err)

@@ -20,6 +20,7 @@ type User struct {
 	SteamID   string
 	Nickname  string
 	AvatarURL string
+	Status    string // enabled|disabled，manager后台可以禁用账号
 	CreatedAt time.Time
 }
 
@@ -47,9 +48,11 @@ func (s *Store) Migrate(ctx context.Context) error {
 			steam_id   TEXT NOT NULL DEFAULT '',
 			nickname   TEXT NOT NULL DEFAULT '',
 			avatar_url TEXT NOT NULL DEFAULT '',
+			status     TEXT NOT NULL DEFAULT 'enabled',
 			created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
+		ALTER TABLE wx_users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'enabled';
 		CREATE TABLE IF NOT EXISTS wx_sessions (
 			token      TEXT PRIMARY KEY,
 			openid     TEXT NOT NULL REFERENCES wx_users(openid) ON DELETE CASCADE,
@@ -82,9 +85,15 @@ func (s *Store) CreateSession(ctx context.Context, token, openid string) error {
 	return err
 }
 
+// GetOpenIDByToken 顺带校验账号状态：被manager后台禁用的账号，已签发的session
+// 立刻失效（下一次请求就会401），不用等用户重新登录才生效。
 func (s *Store) GetOpenIDByToken(ctx context.Context, token string) (string, bool) {
 	var openid string
-	err := s.pool.QueryRow(ctx, `SELECT openid FROM wx_sessions WHERE token = $1`, token).Scan(&openid)
+	err := s.pool.QueryRow(ctx, `
+		SELECT s.openid FROM wx_sessions s
+		JOIN wx_users u ON u.openid = s.openid
+		WHERE s.token = $1 AND u.status = 'enabled'
+	`, token).Scan(&openid)
 	if err != nil {
 		return "", false
 	}
@@ -104,12 +113,27 @@ func (s *Store) UpsertUser(ctx context.Context, openid string) error {
 func (s *Store) GetUser(ctx context.Context, openid string) (*User, error) {
 	var u User
 	err := s.pool.QueryRow(ctx, `
-		SELECT openid, steam_id, nickname, avatar_url, created_at FROM wx_users WHERE openid = $1
-	`, openid).Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL, &u.CreatedAt)
+		SELECT openid, steam_id, nickname, avatar_url, status, created_at FROM wx_users WHERE openid = $1
+	`, openid).Scan(&u.OpenID, &u.SteamID, &u.Nickname, &u.AvatarURL, &u.Status, &u.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
 	return &u, err
+}
+
+// ResolveSession 校验token是否有效，并区分"账号被禁用"和"token无效/账号已删除"两种情况——
+// 前者要明确提示用户联系管理员，后者按普通的未登录处理就行。
+func (s *Store) ResolveSession(ctx context.Context, token string) (openid string, disabled bool, ok bool) {
+	var status string
+	err := s.pool.QueryRow(ctx, `
+		SELECT s.openid, u.status FROM wx_sessions s
+		JOIN wx_users u ON u.openid = s.openid
+		WHERE s.token = $1
+	`, token).Scan(&openid, &status)
+	if err != nil {
+		return "", false, false
+	}
+	return openid, status != "enabled", true
 }
 
 func (s *Store) UpdateSteamID(ctx context.Context, openid, steamID string) error {

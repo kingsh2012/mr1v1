@@ -22,9 +22,15 @@ func CORS() gin.HandlerFunc {
 func Auth(s *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		token := c.GetHeader("Authorization")
-		openid, ok := s.GetOpenIDByToken(c.Request.Context(), token)
+		openid, disabled, ok := s.ResolveSession(c.Request.Context(), token)
 		if !ok {
 			resp.Fail(c, 401, "unauthorized")
+			return
+		}
+		// 账号被manager后台禁用：跟"没登录"区分开来返回，前端要明确提示联系管理员，
+		// 而不是当成普通401静默弹回登录页
+		if disabled {
+			resp.Fail(c, 403, "account_disabled")
 			return
 		}
 		c.Set("openid", openid)
