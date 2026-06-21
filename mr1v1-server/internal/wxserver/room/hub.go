@@ -169,8 +169,16 @@ readLoop:
 			h.send(remaining.conn, Event{Type: "player_left", Role: "creator", Name: name})
 		}
 	default:
-		// joiner 离开（主动或断线一视同仁，且尚未matched）→ 清空 joiner，房间回到 waiting
+		// joiner 离开（主动或断线一视同仁，且尚未matched）→ 清空 joiner，房间回到 waiting。
+		// 房主之前对"这个joiner"点的确认不能带到下一个joiner身上，必须清掉，
+		// 否则下一个人进来时房主会显示成"已经确认"的假象（房主自己也没法靠它重新确认，
+		// 因为前端是看myConfirmed切换文案，状态卡在true点不动）
 		_ = h.store.LeaveRoom(context.Background(), h.roomID, openid)
+		h.mu.Lock()
+		if h.slots[0] != nil {
+			h.slots[0].confirmed = false
+		}
+		h.mu.Unlock()
 		if remaining != nil {
 			h.send(remaining.conn, Event{Type: "player_left", Role: "joiner", Name: name})
 		}
@@ -217,6 +225,9 @@ func (h *Hub) handleKickJoiner() {
 	joiner := h.slots[1]
 	creator := h.slots[0]
 	h.slots[1] = nil
+	if creator != nil {
+		creator.confirmed = false // 踢了人，房主对TA点的确认作废，跟default分支的joiner离开一个道理
+	}
 	h.mu.Unlock()
 
 	if joiner == nil {
