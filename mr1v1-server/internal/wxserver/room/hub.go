@@ -134,6 +134,10 @@ readLoop:
 				explicitClose = true
 				break readLoop
 			}
+		case "kick_joiner":
+			if role == "creator" {
+				h.handleKickJoiner()
+			}
 		}
 	}
 
@@ -199,6 +203,30 @@ func (h *Hub) handleConfirm(idx int, openid, name, steamID, role string) {
 
 	if creator != nil && joiner != nil && creator.confirmed && joiner.confirmed {
 		h.triggerMatch(creator, joiner)
+	}
+}
+
+// handleKickJoiner 房主主动把已加入的对手请出房间——跟"被动等对方确认"不同，
+// 房主有权直接拒绝当前这个对手，不需要任何理由。matched之后不允许踢（已经在建服/比赛中）。
+func (h *Hub) handleKickJoiner() {
+	h.mu.Lock()
+	if h.matched {
+		h.mu.Unlock()
+		return
+	}
+	joiner := h.slots[1]
+	creator := h.slots[0]
+	h.slots[1] = nil
+	h.mu.Unlock()
+
+	if joiner == nil {
+		return
+	}
+	_ = h.store.LeaveRoom(context.Background(), h.roomID, joiner.openid)
+	h.send(joiner.conn, Event{Type: "kicked", Message: "房主已将你请出房间"})
+	joiner.conn.Close()
+	if creator != nil {
+		h.send(creator.conn, Event{Type: "player_left", Role: "joiner", Name: joiner.name})
 	}
 }
 
