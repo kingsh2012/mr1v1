@@ -27,6 +27,14 @@ func ListRooms(s *store.Store) gin.HandlerFunc {
 		if rooms == nil {
 			rooms = []store.Room{}
 		}
+		// 这个接口游客也能访问（不强制登录），openid不对外暴露；
+		// 只有带了有效token的请求才会算出is_mine，告诉前端哪间是自己创建的房
+		oid := openid(c)
+		if oid != "" {
+			for i := range rooms {
+				rooms[i].IsMine = rooms[i].CreatorOpenID == oid
+			}
+		}
 		resp.OK(c, rooms)
 	}
 }

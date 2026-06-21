@@ -42,12 +42,13 @@ func main() {
 	wx := r.Group("/api/wx")
 	wx.POST("/login", handlers.Login(cfg, s))
 	wx.GET("/legacy-players/search", handlers.SearchLegacyPlayers(s))
+	// 房间列表不强制登录：游客也能看到有哪些房间可以玩，点进去加入/创建时才要求登录
+	wx.GET("/rooms", handlers.OptionalAuth(s), handlers.ListRooms(s))
 
 	auth := wx.Group("", handlers.Auth(s))
 	auth.GET("/user", handlers.GetUser(s))
 	auth.POST("/user", handlers.UpdateSteamID(s))
 	auth.PATCH("/user", handlers.UpdateProfile(s))
-	auth.GET("/rooms", handlers.ListRooms(s))
 	auth.POST("/rooms", handlers.CreateRoom(s))
 	auth.POST("/rooms/:id/join", handlers.JoinRoom(s))
 	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s, mgr))

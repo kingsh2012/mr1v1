@@ -129,14 +129,15 @@ func (s *Store) UpdateProfile(ctx context.Context, openid, avatarURL, nickname s
 type Room struct {
 	ID            string `json:"id"`
 	Title         string `json:"title"`
-	CreatorOpenID string `json:"creator_openid"`
+	CreatorOpenID string `json:"-"` // 不对外序列化：openid是用户隐私标识，房间列表现在游客可访问，不能裸传
 	CreatorName   string `json:"creator_name"`
 	CreatorAvatar string `json:"creator_avatar"`
-	JoinerOpenID  string `json:"joiner_openid,omitempty"`
+	JoinerOpenID  string `json:"-"`
 	JoinerName    string `json:"joiner_name,omitempty"`
 	JoinerAvatar  string `json:"joiner_avatar,omitempty"`
 	Locked        bool   `json:"locked"`
 	Status        string `json:"status"` // waiting|ready|matched
+	IsMine        bool   `json:"is_mine,omitempty"` // 仅ListRooms根据当前登录用户算出来，游客/未关联到则为false
 }
 
 func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {

@@ -32,6 +32,20 @@ func Auth(s *store.Store) gin.HandlerFunc {
 	}
 }
 
+// OptionalAuth 尝试用token解析openid，没带token或token失效也放行（不返回401），
+// 用于游客可访问、但登录用户能额外识别身份的接口（比如房间列表要给登录用户标out哪间是自己的房）。
+func OptionalAuth(s *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		token := c.GetHeader("Authorization")
+		if token != "" {
+			if openid, ok := s.GetOpenIDByToken(c.Request.Context(), token); ok {
+				c.Set("openid", openid)
+			}
+		}
+		c.Next()
+	}
+}
+
 // InternalAuth 校验服务间调用的 X-API-Key（manager-backend/consumer 同步
 // 比赛结束状态时使用），未配置 key 时直接拒绝，避免裸奔。
 func InternalAuth(internalAPIKey string) gin.HandlerFunc {
