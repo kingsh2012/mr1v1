@@ -203,6 +203,7 @@ func (b *Backend) Handler(prefix string) http.Handler {
 	// 小程序侧数据只读查看（房间/微信用户/老玩家）
 	api.GET("/wx-rooms", b.handleListWxRooms)
 	api.GET("/wx-users", b.handleListWxUsers)
+	api.DELETE("/wx-users/:openid", b.handleDeleteWxUser)
 	api.GET("/legacy-players", b.handleListLegacyPlayers)
 
 	// 静态文件 & SPA 路由兜底
@@ -908,6 +909,45 @@ func (b *Backend) handleListWxUsers(c *gin.Context) {
 		result = []wxUserRow{}
 	}
 	resp.OK(c, result)
+}
+
+// handleDeleteWxUser 删除一个微信用户。wx_rooms.creator_openid是NOT NULL外键，
+// 该用户创建过的房间必须先删掉（不能像joiner_openid那样置空）；
+// wx_sessions有ON DELETE CASCADE，不用手动处理。
+func (b *Backend) handleDeleteWxUser(c *gin.Context) {
+	openid := c.Param("openid")
+	ctx := c.Request.Context()
+
+	tx, err := b.pool.Begin(ctx)
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx, `DELETE FROM wx_rooms WHERE creator_openid = $1`, openid); err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	if _, err := tx.Exec(ctx, `UPDATE wx_rooms SET joiner_openid = NULL WHERE joiner_openid = $1`, openid); err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	tag, err := tx.Exec(ctx, `DELETE FROM wx_users WHERE openid = $1`, openid)
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	if tag.RowsAffected() == 0 {
+		resp.Fail(c, 404, "user not found")
+		return
+	}
+	if err := tx.Commit(ctx); err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+
+	resp.OK(c, gin.H{"ok": "1"})
 }
 
 type legacyPlayerRow struct {

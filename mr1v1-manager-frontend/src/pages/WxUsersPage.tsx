@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Table, Avatar, Button, Space, Typography } from 'antd'
-import { UserOutlined } from '@ant-design/icons'
+import { Table, Avatar, Button, Space, Typography, Popconfirm, message } from 'antd'
+import { UserOutlined, DeleteOutlined } from '@ant-design/icons'
 import api from '../api'
 import dayjs from 'dayjs'
 
@@ -31,6 +31,12 @@ export default function WxUsersPage() {
   }
 
   useEffect(() => { fetchUsers() }, [])
+
+  const handleDelete = async (openid: string) => {
+    await api.delete(`/wx-users/${openid}`)
+    message.success('已删除')
+    fetchUsers()
+  }
 
   const columns = [
     {
@@ -64,6 +70,23 @@ export default function WxUsersPage() {
       dataIndex: 'updated_at',
       key: 'updated_at',
       render: (v: string) => dayjs(v).format(FMT),
+    },
+    {
+      title: '操作',
+      key: 'action',
+      width: 90,
+      render: (_: unknown, r: WxUser) => (
+        <Popconfirm
+          title="删除该微信用户？"
+          description="会一并删掉该用户创建的房间，无法恢复。"
+          onConfirm={() => handleDelete(r.openid)}
+          okText="删除"
+          okType="danger"
+          cancelText="取消"
+        >
+          <Button size="small" danger icon={<DeleteOutlined />}>删除</Button>
+        </Popconfirm>
+      ),
     },
   ]
 
