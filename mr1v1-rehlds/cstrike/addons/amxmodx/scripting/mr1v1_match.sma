@@ -854,9 +854,9 @@ bool:SelectMatchPlayers() {
 
 // 比赛开始时一次性公示规则：捡枪式，无强制武器
 AnnounceMatchRules() {
-	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始");
-	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始");
-	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始！");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始！");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始！");
 	client_print_color(0, print_team_red, "^4[1v1] ^1本场比赛决胜方式：^3最多31回合，先到16胜");
 }
 
@@ -1095,9 +1095,9 @@ public Task_AnnounceMatchResult() {
 	new winnerName[32];
 	get_user_name(g_iPlayer[winner], winnerName, charsmax(winnerName));
 
-	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束");
-	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束");
-	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束！");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束！");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束！");
 
 	set_hudmessage(0, 255, 0, -1.0, 0.35, 0, 6.0, 6.0);
 	client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！%s获胜！比分%d:%d", winnerName, g_iWins[0], g_iWins[1]);
