@@ -28,6 +28,7 @@ interface Agent {
   rehlds_run_max: number
   rehlds_port_range: string
   running_containers: string
+  version: string
   created_at: string
   updated_at: string
   heartbeat_at: string
@@ -297,6 +298,24 @@ export default function AgentsPage() {
   const cnt = portCount(portMode, portStart, portEnd, portList)
   const portInsufficient = cnt > 0 && runMax > 0 && cnt < runMax
 
+  // 跟backend调度逻辑保持一致：版本号按"."分段数值比较，取在线agent里最高的当作
+  // "最新版本"，落后的agent即便在线也不会被backend派活，这里标红提醒需要升级
+  const compareVersions = (a: string, b: string) => {
+    const pa = a.split('.').map(Number)
+    const pb = b.split('.').map(Number)
+    for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+      const na = pa[i] ?? 0
+      const nb = pb[i] ?? 0
+      if (Number.isNaN(na) || Number.isNaN(nb)) return a.localeCompare(b)
+      if (na !== nb) return na - nb
+    }
+    return 0
+  }
+  const latestVersion = agents
+    .map(a => a.version)
+    .filter(Boolean)
+    .reduce((max, v) => (compareVersions(v, max) > 0 ? v : max), '')
+
   const columns = [
     {
       title: '在线',
@@ -324,6 +343,16 @@ export default function AgentsPage() {
       ),
     },
     { title: 'REHLDS端口范围', dataIndex: 'rehlds_port_range', key: 'rehlds_port_range' },
+    {
+      title: 'Agent版本',
+      dataIndex: 'version',
+      key: 'version',
+      render: (v: string) => {
+        if (!v) return <Text type="secondary">未知</Text>
+        const stale = latestVersion !== '' && v !== latestVersion
+        return <Tag color={stale ? 'red' : 'default'}>{v}{stale ? ' (待升级)' : ''}</Tag>
+      },
+    },
     {
       title: '运行负载',
       key: 'load',

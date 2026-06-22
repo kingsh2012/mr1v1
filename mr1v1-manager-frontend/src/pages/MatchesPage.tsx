@@ -21,6 +21,7 @@ interface Match {
   agent_uuid: string
   port: number
   image: string
+  map_name: string
   state: string
   created_at: string
   updated_at: string
@@ -378,6 +379,10 @@ export default function MatchesPage() {
     { title: '玩家0 SteamID', dataIndex: 'p0_steamid', key: 'p0_steamid' },
     { title: '玩家1 SteamID', dataIndex: 'p1_steamid', key: 'p1_steamid' },
     { title: '服务器名', dataIndex: 'server_name', key: 'server_name' },
+    {
+      title: '地图', dataIndex: 'map_name', key: 'map_name',
+      render: (v: string) => v ? <Tag color="green">{v}</Tag> : <Text type="secondary">-</Text>,
+    },
     { title: 'Agent', dataIndex: 'agent_uuid', key: 'agent_uuid', ellipsis: true },
     { title: '端口', dataIndex: 'port', key: 'port', width: 80 },
     { title: '创建时间', dataIndex: 'created_at', key: 'created_at',

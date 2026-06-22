@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { Layout, Menu, Button } from 'antd'
 import {
   RobotOutlined, CloudServerOutlined, TrophyOutlined, LogoutOutlined,
-  HomeOutlined, TeamOutlined, IdcardOutlined, EnvironmentOutlined,
+  HomeOutlined, TeamOutlined, IdcardOutlined, EnvironmentOutlined, MessageOutlined,
 } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import AgentsPage from './pages/AgentsPage'
@@ -12,6 +12,7 @@ import WxRoomsPage from './pages/WxRoomsPage'
 import WxUsersPage from './pages/WxUsersPage'
 import LegacyPlayersPage from './pages/LegacyPlayersPage'
 import MapsPage from './pages/MapsPage'
+import FeedbackPage from './pages/FeedbackPage'
 import LoginPage from './pages/LoginPage'
 import api from './api'
 
@@ -33,6 +34,7 @@ const pageRoutes: PageRoute[] = [
   { key: 'wx-rooms', path: 'wx-rooms', label: '房间列表', icon: <HomeOutlined />, element: <WxRoomsPage /> },
   { key: 'wx-users', path: 'wx-users', label: '微信用户', icon: <TeamOutlined />, element: <WxUsersPage /> },
   { key: 'legacy-players', path: 'legacy-players', label: '老玩家列表', icon: <IdcardOutlined />, element: <LegacyPlayersPage /> },
+  { key: 'feedback', path: 'feedback', label: '改进建议', icon: <MessageOutlined />, element: <FeedbackPage /> },
 ]
 
 function MainLayout() {
