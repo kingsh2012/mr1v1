@@ -103,14 +103,20 @@ func (s *Store) GetOpenIDByToken(ctx context.Context, token string) (string, boo
 // UpsertUser 登录时建档，已存在则仅更新updated_at（不会覆盖已有nickname/avatar_url，
 // 包括用户后来自己改过的）。首次建档时给一个随机中文昵称+对应的随机头像，
 // 新用户不至于显示空白。publicURL用来拼出头像的完整外部可访问URL。
-func (s *Store) UpsertUser(ctx context.Context, openid, publicURL string) error {
+// 返回isNew供登录接口判断要不要引导去设置资料页——只有真正第一次登录才需要跳转，
+// 老用户每次登录都跳转会很烦人。
+func (s *Store) UpsertUser(ctx context.Context, openid, publicURL string) (isNew bool, err error) {
 	nickname := namegen.Generate()
 	avatarURL := namegen.AvatarURL(publicURL, nickname)
-	_, err := s.pool.Exec(ctx, `
+	var existed bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM wx_users WHERE openid = $1)`, openid).Scan(&existed); err != nil {
+		return false, err
+	}
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO wx_users (openid, nickname, avatar_url) VALUES ($1, $2, $3)
 		ON CONFLICT (openid) DO UPDATE SET updated_at = now()
 	`, openid, nickname, avatarURL)
-	return err
+	return !existed, err
 }
 
 func (s *Store) GetUser(ctx context.Context, openid string) (*User, error) {

@@ -51,7 +51,8 @@ func Login(cfg *config.WxConfig, s *store.Store) gin.HandlerFunc {
 			return
 		}
 
-		if err := s.UpsertUser(c.Request.Context(), openid, cfg.PublicURL); err != nil {
+		isNew, err := s.UpsertUser(c.Request.Context(), openid, cfg.PublicURL)
+		if err != nil {
 			slog.Warn("upsert wx_user failed", "openid", openid, "err", err)
 			resp.Fail(c, 500, "db error")
 			return
@@ -72,7 +73,7 @@ func Login(cfg *config.WxConfig, s *store.Store) gin.HandlerFunc {
 			return
 		}
 
-		resp.OK(c, gin.H{"token": token, "openid": openid})
+		resp.OK(c, gin.H{"token": token, "openid": openid, "is_new": isNew})
 	}
 }
 
