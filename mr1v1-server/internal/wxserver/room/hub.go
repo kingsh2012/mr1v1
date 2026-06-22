@@ -170,7 +170,7 @@ readLoop:
 		// 否则会跟"已经matched"的事实自相矛盾，且match_ended会负责后续的真正收尾
 	case role == "creator" && explicitClose:
 		// 房主主动点击"关闭房间" → 软删除并踢出对手
-		_ = h.store.DeleteRoom(context.Background(), h.roomID)
+		_ = h.store.DeleteRoom(context.Background(), h.roomID, "closed")
 		if remaining != nil {
 			h.send(remaining.conn, Event{Type: "room_closed", Message: "房主已关闭房间"})
 			remaining.conn.Close()

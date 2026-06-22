@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"strings"
+
 	"github.com/gin-gonic/gin"
 	"mr1v1-server/internal/resp"
 	"mr1v1-server/internal/wxserver/store"
@@ -59,6 +61,24 @@ func UpdateProfile(s *store.Store) gin.HandlerFunc {
 			return
 		}
 		if err := s.UpdateProfile(c.Request.Context(), openid(c), req.AvatarURL, req.Nickname); err != nil {
+			resp.Fail(c, 500, "db error")
+			return
+		}
+		resp.OK(c, gin.H{"ok": "1"})
+	}
+}
+
+// SubmitFeedback 提交一条改进建议，manager后台跨服务直读wx_feedback表展示。
+func SubmitFeedback(s *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var req struct {
+			Content string `json:"content"`
+		}
+		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Content) == "" {
+			resp.Fail(c, 400, "content required")
+			return
+		}
+		if err := s.SubmitFeedback(c.Request.Context(), openid(c), strings.TrimSpace(req.Content)); err != nil {
 			resp.Fail(c, 500, "db error")
 			return
 		}

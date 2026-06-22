@@ -160,7 +160,7 @@ func LeaveRoom(s *store.Store, mgr *room.Manager) gin.HandlerFunc {
 		}
 
 		if rm.CreatorOpenID == oid {
-			if err := s.DeleteRoom(c.Request.Context(), roomID); err != nil {
+			if err := s.DeleteRoom(c.Request.Context(), roomID, "closed"); err != nil {
 				resp.Fail(c, 500, "db error")
 				return
 			}

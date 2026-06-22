@@ -58,6 +58,7 @@ func main() {
 	auth.PATCH("/user", handlers.UpdateProfile(s))
 	auth.POST("/avatar", handlers.UploadAvatar(cfg.AvatarsDir, cfg.PublicURL))
 	auth.GET("/my-matches", handlers.MyMatches(s))
+	auth.POST("/feedback", handlers.SubmitFeedback(s))
 	auth.POST("/rooms", handlers.CreateRoom(s))
 	auth.POST("/rooms/:id/join", handlers.JoinRoom(s))
 	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s, mgr))
@@ -100,7 +101,7 @@ func sweepStaleRooms(ctx context.Context, s *store.Store, mgr *room.Manager, idl
 				if mgr.IsActive(id) {
 					continue
 				}
-				if err := s.DeleteRoom(ctx, id); err != nil {
+				if err := s.DeleteRoom(ctx, id, "timeout"); err != nil {
 					slog.Error("sweep stale room failed", "room", id, "error", err)
 					continue
 				}

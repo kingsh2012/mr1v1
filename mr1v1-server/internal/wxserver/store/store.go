@@ -77,7 +77,20 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS score_joiner INT NOT NULL DEFAULT 0;
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'rifle';
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS map_name TEXT NOT NULL DEFAULT '';
+		CREATE TABLE IF NOT EXISTS wx_feedback (
+			id         BIGSERIAL PRIMARY KEY,
+			openid     TEXT NOT NULL REFERENCES wx_users(openid),
+			content    TEXT NOT NULL,
+			created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+		);
 	`)
+	return err
+}
+
+// SubmitFeedback 写入一条用户改进建议，manager后台用handleListWxFeedback跨服务直读这张表
+// （跟wx_rooms/wx_users的现有读法一致，同一个Postgres实例，不需要再加一层API转发）。
+func (s *Store) SubmitFeedback(ctx context.Context, openid, content string) error {
+	_, err := s.pool.Exec(ctx, `INSERT INTO wx_feedback (openid, content) VALUES ($1, $2)`, openid, content)
 	return err
 }
 
@@ -364,8 +377,15 @@ func (s *Store) SetRoomMatched(ctx context.Context, id, matchID, serverAddr stri
 	return err
 }
 
-func (s *Store) DeleteRoom(ctx context.Context, id string) error {
-	_, err := s.pool.Exec(ctx, `UPDATE wx_rooms SET deleted_at = now(), updated_at = now() WHERE id = $1`, id)
+// DeleteRoom 软删除房间，status记成closed(房主手动关闭)或timeout(后台扫描自动关闭)，
+// 跟"completed"(正常打完)、"matched"(还在对战中被关)区分开，比赛记录页要按这个status
+// 展示具体原因，不能笼统都显示成"对手离开"。
+func (s *Store) DeleteRoom(ctx context.Context, id, status string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE wx_rooms SET deleted_at = now(), updated_at = now(),
+			status = CASE WHEN status = 'completed' THEN status ELSE $2 END
+		WHERE id = $1
+	`, id, status)
 	return err
 }
 

@@ -17,6 +17,7 @@ import (
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 
+	"mr1v1-server/internal/agent/version"
 	"mr1v1-server/internal/agentproto"
 	"mr1v1-server/internal/config"
 	"mr1v1-server/internal/dockerctl"
@@ -399,6 +400,7 @@ func (a *Agent) heartbeatLoop() {
 			DiskGB:         info.diskGB,
 			RunningMatches: runningMatches,
 			Containers:     protoContainers,
+			Version:        version.Version,
 			Timestamp:      time.Now().Unix(),
 		}
 		payload, err := json.Marshal(hb)

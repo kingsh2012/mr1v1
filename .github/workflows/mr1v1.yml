@@ -175,7 +175,10 @@ jobs:
 
       - name: Resolve version
         id: meta
-        run: echo "version=${GITHUB_REF#refs/tags/mr1v1-agent-v}" >> "$GITHUB_OUTPUT"
+        run: |
+          echo "version=${GITHUB_REF#refs/tags/mr1v1-agent-v}" >> "$GITHUB_OUTPUT"
+          echo "build_time=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "git_commit=${GITHUB_SHA}" >> "$GITHUB_OUTPUT"
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -199,7 +202,10 @@ jobs:
         working-directory: mr1v1-server
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -trimpath -ldflags="-s -w" \
+          go build -trimpath -ldflags "-s -w \
+            -X mr1v1-server/internal/agent/version.Version=${{ steps.meta.outputs.version }} \
+            -X mr1v1-server/internal/agent/version.BuildTime=${{ steps.meta.outputs.build_time }} \
+            -X mr1v1-server/internal/agent/version.GitCommit=${{ steps.meta.outputs.git_commit }}" \
             -o mr1v1-agent ./cmd/agent
           upx --best mr1v1-agent
 

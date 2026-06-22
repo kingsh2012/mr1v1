@@ -215,6 +215,7 @@ func (b *Backend) Handler(prefix string) http.Handler {
 	api.PATCH("/wx-users/:openid", b.handleUpdateWxUser)
 	api.DELETE("/wx-users/:openid", b.handleDeleteWxUser)
 	api.GET("/legacy-players", b.handleListLegacyPlayers)
+	api.GET("/wx-feedback", b.handleListWxFeedback)
 
 	// 静态文件 & SPA 路由兜底
 	r.NoRoute(gin.WrapH(b.staticHandler()))
@@ -353,9 +354,9 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 	// 写入比赛记录
 	if _, err := b.pool.Exec(ctx, `
 		INSERT INTO manager_matches
-			(match_id, p0_steamid, p1_steamid, server_name, agent_uuid, port, image, state)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,'creating')
-	`, matchID, req.P0SteamID, req.P1SteamID, serverName, uuid, port, image); err != nil {
+			(match_id, p0_steamid, p1_steamid, server_name, agent_uuid, port, image, map_name, state)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'creating')
+	`, matchID, req.P0SteamID, req.P1SteamID, serverName, uuid, port, image, mapName); err != nil {
 		slog.Error("insert match failed", "error", err)
 		// 非致命错误，不阻断响应
 	}
@@ -374,6 +375,29 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 // rehlds_port_range格式"start-end"（为空表示agent尚未初始化完成，不参与调度）。
 // 多个agent都有空闲容量时，按"当前在跑比赛数 / rehlds_run_max"负载占比从低到高选，
 // 而不是固定优先用心跳最新的那个——避免出现一台agent被打满、其他agent完全空闲的不均衡情况。
+// compareVersions 按"."分段数值比较两个版本号(如"0.1.10" > "0.1.8")，
+// 任一段非数字时整体退回字符串比较，避免agent版本号格式不规范时panic或误判。
+func compareVersions(a, b string) int {
+	pa, pb := strings.Split(a, "."), strings.Split(b, ".")
+	for i := 0; i < len(pa) || i < len(pb); i++ {
+		var na, nb int
+		var erra, errb error
+		if i < len(pa) {
+			na, erra = strconv.Atoi(pa[i])
+		}
+		if i < len(pb) {
+			nb, errb = strconv.Atoi(pb[i])
+		}
+		if erra != nil || errb != nil {
+			return strings.Compare(a, b)
+		}
+		if na != nb {
+			return na - nb
+		}
+	}
+	return 0
+}
+
 func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, port int, err error) {
 	stale := b.cfg.AgentStaleSeconds
 	if stale <= 0 {
@@ -381,7 +405,7 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 	}
 
 	rows, err := b.pool.Query(ctx, `
-		SELECT uuid, public_ip, rehlds_port_range, rehlds_run_max
+		SELECT uuid, public_ip, rehlds_port_range, rehlds_run_max, version
 		FROM manager_agents
 		WHERE status = 'enabled'
 		  AND heartbeat_at > NOW() - $1 * INTERVAL '1 second'
@@ -398,17 +422,40 @@ func (b *Backend) pickAgentPort(ctx context.Context) (uuid, publicIP string, por
 		publicIP  string
 		portRange string
 		runMax    int
+		version   string
 	}
 	var candidates []candidate
 	for rows.Next() {
 		var c candidate
-		if err := rows.Scan(&c.uuid, &c.publicIP, &c.portRange, &c.runMax); err != nil {
+		if err := rows.Scan(&c.uuid, &c.publicIP, &c.portRange, &c.runMax, &c.version); err != nil {
 			continue
 		}
 		candidates = append(candidates, c)
 	}
 	if len(candidates) == 0 {
 		return "", "", 0, fmt.Errorf("no available agent")
+	}
+
+	// 版本一致性校验：只要有agent上报了非空版本号，就要求候选agent的版本号跟其中
+	// 最新的一致，漏升级的agent会被排除在调度之外，避免新功能(如MAP环境变量)在旧
+	// agent上悄悄失效。如果全部agent都还没上报版本号(老协议/本地调试)，不做限制。
+	latestVersion := ""
+	for _, c := range candidates {
+		if c.version != "" && compareVersions(c.version, latestVersion) > 0 {
+			latestVersion = c.version
+		}
+	}
+	if latestVersion != "" {
+		filtered := candidates[:0]
+		for _, c := range candidates {
+			if c.version == latestVersion {
+				filtered = append(filtered, c)
+			}
+		}
+		candidates = filtered
+	}
+	if len(candidates) == 0 {
+		return "", "", 0, fmt.Errorf("no available agent running the latest version")
 	}
 
 	type option struct {
@@ -476,6 +523,7 @@ type matchRow struct {
 	AgentUUID  string    `json:"agent_uuid"`
 	Port       int       `json:"port"`
 	Image      string    `json:"image"`
+	MapName    string    `json:"map_name"`
 	State      string    `json:"state"`
 	CreatedAt  time.Time `json:"created_at"`
 	UpdatedAt  time.Time `json:"updated_at"`
@@ -484,7 +532,7 @@ type matchRow struct {
 func (b *Backend) handleListMatches(c *gin.Context) {
 	rows, err := b.pool.Query(c.Request.Context(), `
 		SELECT match_id, p0_steamid, p1_steamid, server_name,
-		       agent_uuid, port, image, state, created_at, updated_at
+		       agent_uuid, port, image, map_name, state, created_at, updated_at
 		FROM manager_matches
 		ORDER BY created_at DESC
 		LIMIT 100
@@ -499,7 +547,7 @@ func (b *Backend) handleListMatches(c *gin.Context) {
 	for rows.Next() {
 		var m matchRow
 		if err := rows.Scan(&m.MatchID, &m.P0SteamID, &m.P1SteamID, &m.ServerName,
-			&m.AgentUUID, &m.Port, &m.Image, &m.State, &m.CreatedAt, &m.UpdatedAt); err != nil {
+			&m.AgentUUID, &m.Port, &m.Image, &m.MapName, &m.State, &m.CreatedAt, &m.UpdatedAt); err != nil {
 			continue
 		}
 		result = append(result, m)
@@ -660,20 +708,21 @@ func (b *Backend) activeRehldsImage(ctx context.Context) (string, error) {
 }
 
 type agentRow struct {
-	UUID         string    `json:"uuid"`
-	Hostname     string    `json:"hostname"`
-	PublicIP     string    `json:"public_ip"`
-	LocalIP      string    `json:"local_ip"`
-	CPU          string    `json:"cpu"`
-	MemMB        int64     `json:"mem_mb"`
-	DiskGB       int64     `json:"disk_gb"`
-	Status       string    `json:"status"`
-	RehldsRunMax int       `json:"rehlds_run_max"`
-	PortRange    string    `json:"rehlds_port_range"`
+	UUID              string    `json:"uuid"`
+	Hostname          string    `json:"hostname"`
+	PublicIP          string    `json:"public_ip"`
+	LocalIP           string    `json:"local_ip"`
+	CPU               string    `json:"cpu"`
+	MemMB             int64     `json:"mem_mb"`
+	DiskGB            int64     `json:"disk_gb"`
+	Status            string    `json:"status"`
+	RehldsRunMax      int       `json:"rehlds_run_max"`
+	PortRange         string    `json:"rehlds_port_range"`
 	CreatedAt         time.Time `json:"created_at"`
 	UpdatedAt         time.Time `json:"updated_at"`
 	HeartbeatAt       time.Time `json:"heartbeat_at"`
 	RunningContainers string    `json:"running_containers"`
+	Version           string    `json:"version"`
 }
 
 // 比赛容器实际存活的状态：creating(正在拉起)/waiting(等待双方确认)/playing(对局中)，
@@ -685,7 +734,7 @@ func (b *Backend) handleListAgents(c *gin.Context) {
 		SELECT a.uuid, a.hostname, a.public_ip, a.local_ip, a.cpu, a.mem_mb, a.disk_gb,
 		       a.status, a.rehlds_run_max, a.rehlds_port_range,
 		       a.created_at, a.updated_at, a.heartbeat_at,
-		       COALESCE(m.running, '') AS running_containers
+		       COALESCE(m.running, '') AS running_containers, a.version
 		FROM manager_agents a
 		LEFT JOIN (
 			SELECT agent_uuid, string_agg(match_id, ',') AS running
@@ -707,7 +756,7 @@ func (b *Backend) handleListAgents(c *gin.Context) {
 		if err := rows.Scan(&a.UUID, &a.Hostname, &a.PublicIP, &a.LocalIP,
 			&a.CPU, &a.MemMB, &a.DiskGB, &a.Status,
 			&a.RehldsRunMax, &a.PortRange,
-			&a.CreatedAt, &a.UpdatedAt, &a.HeartbeatAt, &a.RunningContainers); err != nil {
+			&a.CreatedAt, &a.UpdatedAt, &a.HeartbeatAt, &a.RunningContainers, &a.Version); err != nil {
 			continue
 		}
 		result = append(result, a)
@@ -1044,6 +1093,42 @@ func (b *Backend) handleListWxRooms(c *gin.Context) {
 	}
 	if result == nil {
 		result = []wxRoomRow{}
+	}
+	resp.OK(c, result)
+}
+
+type wxFeedbackRow struct {
+	ID        int64     `json:"id"`
+	OpenID    string    `json:"-"`
+	Nickname  string    `json:"nickname"`
+	Content   string    `json:"content"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (b *Backend) handleListWxFeedback(c *gin.Context) {
+	rows, err := b.pool.Query(c.Request.Context(), `
+		SELECT f.id, f.openid, COALESCE(u.nickname,''), f.content, f.created_at
+		FROM wx_feedback f
+		JOIN wx_users u ON u.openid = f.openid
+		ORDER BY f.created_at DESC
+		LIMIT 200
+	`)
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	defer rows.Close()
+
+	var result []wxFeedbackRow
+	for rows.Next() {
+		var fb wxFeedbackRow
+		if err := rows.Scan(&fb.ID, &fb.OpenID, &fb.Nickname, &fb.Content, &fb.CreatedAt); err != nil {
+			continue
+		}
+		result = append(result, fb)
+	}
+	if result == nil {
+		result = []wxFeedbackRow{}
 	}
 	resp.OK(c, result)
 }

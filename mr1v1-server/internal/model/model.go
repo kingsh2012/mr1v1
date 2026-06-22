@@ -18,10 +18,12 @@ var BackendStatements = []string{
 		rehlds_run_max     INT          NOT NULL DEFAULT 0,
 		rehlds_port_range  VARCHAR(32)  NOT NULL DEFAULT '',
 		containers_json    JSONB        NOT NULL DEFAULT '[]',
+		version            VARCHAR(32)  NOT NULL DEFAULT '',
 		created_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		updated_at         TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		heartbeat_at       TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
+	`ALTER TABLE manager_agents ADD COLUMN IF NOT EXISTS version VARCHAR(32) NOT NULL DEFAULT ''`,
 	// 旧列名迁移
 	`DO $$ BEGIN
 		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_agents' AND column_name='create_time') THEN
@@ -59,10 +61,12 @@ var BackendStatements = []string{
 		agent_uuid  VARCHAR(64)  NOT NULL DEFAULT '',
 		port        INT          NOT NULL DEFAULT 0,
 		image       VARCHAR(256) NOT NULL DEFAULT '',
+		map_name    VARCHAR(64)  NOT NULL DEFAULT '',
 		state       VARCHAR(16)  NOT NULL DEFAULT 'creating',
 		created_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
 		updated_at  TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
+	`ALTER TABLE manager_matches ADD COLUMN IF NOT EXISTS map_name VARCHAR(64) NOT NULL DEFAULT ''`,
 	`DO $$ BEGIN
 		IF EXISTS (SELECT 1 FROM information_schema.columns WHERE table_name='manager_matches' AND column_name='create_time') THEN
 			ALTER TABLE manager_matches RENAME COLUMN create_time TO created_at;

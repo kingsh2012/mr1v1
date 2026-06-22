@@ -63,8 +63,8 @@ func New(cfg *config.ConsumerConfig) (*Consumer, error) {
 			qos     byte
 			handler mqtt.MessageHandler
 		}{
-			cfg.MQTT.Topic:                       {1, c.onMessage},
-			agentproto.HeartbeatSubscribeFilter:  {0, c.onHeartbeat},
+			cfg.MQTT.Topic:                      {1, c.onMessage},
+			agentproto.HeartbeatSubscribeFilter: {0, c.onHeartbeat},
 		}
 		for topic, s := range subs {
 			if token := client.Subscribe(topic, s.qos, s.handler); token.Wait() && token.Error() != nil {
@@ -340,12 +340,13 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 	_, err := c.pool.Exec(context.Background(), `
 		INSERT INTO manager_agents
 			(uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
-			 status, rehlds_run_max, rehlds_port_range, containers_json,
+			 status, rehlds_run_max, rehlds_port_range, containers_json, version,
 			 created_at, updated_at, heartbeat_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', $9, NOW(), NOW(), NOW())
+		VALUES ($1,$2,$3,$4,$5,$6,$7, 'enabled', $8, '', $9, $10, NOW(), NOW(), NOW())
 		ON CONFLICT (uuid) DO UPDATE SET
 			heartbeat_at    = NOW(),
 			containers_json = EXCLUDED.containers_json,
+			version         = EXCLUDED.version,
 			updated_at = CASE
 				WHEN manager_agents.hostname  != EXCLUDED.hostname
 				  OR manager_agents.public_ip != EXCLUDED.public_ip
@@ -353,6 +354,7 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 				  OR manager_agents.cpu       != EXCLUDED.cpu
 				  OR manager_agents.mem_mb    != EXCLUDED.mem_mb
 				  OR manager_agents.disk_gb   != EXCLUDED.disk_gb
+				  OR manager_agents.version   != EXCLUDED.version
 				THEN NOW()
 				ELSE manager_agents.updated_at
 			END,
@@ -366,6 +368,6 @@ func (c *Consumer) upsertAgent(hb agentproto.Heartbeat) error {
 				WHEN manager_agents.rehlds_run_max = 0 THEN $8
 				ELSE manager_agents.rehlds_run_max
 			END
-	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount, containersJSON)
+	`, hb.UUID, hb.Hostname, hb.PublicIP, hb.LocalIP, hb.CPU, hb.MemMB, hb.DiskGB, cpuCount, containersJSON, hb.Version)
 	return err
 }
