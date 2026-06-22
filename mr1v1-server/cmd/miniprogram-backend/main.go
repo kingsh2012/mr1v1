@@ -57,6 +57,7 @@ func main() {
 	auth.POST("/user", handlers.UpdateSteamID(s))
 	auth.PATCH("/user", handlers.UpdateProfile(s))
 	auth.POST("/avatar", handlers.UploadAvatar(cfg.AvatarsDir, cfg.PublicURL))
+	auth.GET("/my-matches", handlers.MyMatches(s))
 	auth.POST("/rooms", handlers.CreateRoom(s))
 	auth.POST("/rooms/:id/join", handlers.JoinRoom(s))
 	auth.DELETE("/rooms/:id", handlers.LeaveRoom(s, mgr))

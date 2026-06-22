@@ -201,6 +201,54 @@ func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, passwo
 	return err
 }
 
+// MatchRecord 是"我的比赛记录"里展示的单行，从wx_rooms按当前用户视角折算出
+// 对手信息和己方/对手比分，不区分creator/joiner，前端不用关心这两个身份概念。
+type MatchRecord struct {
+	ID             string    `json:"id"`
+	Title          string    `json:"title"`
+	OpponentName   string    `json:"opponent_name"`
+	OpponentAvatar string    `json:"opponent_avatar"`
+	MyScore        int       `json:"my_score"`
+	OpponentScore  int       `json:"opponent_score"`
+	Status         string    `json:"status"` // waiting|ready|matched|completed
+	Category       string    `json:"category"`
+	MapName        string    `json:"map_name,omitempty"`
+	CreatedAt      time.Time `json:"created_at"`
+}
+
+// ListMyMatches 返回该用户作为creator或joiner参与过的所有房间记录，不过滤状态、
+// 不过滤deleted_at——历史记录页要求"任何状态都展示"，跟ListRooms的公开列表不是同一个用途。
+func (s *Store) ListMyMatches(ctx context.Context, openid string) ([]MatchRecord, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT r.id, r.title,
+		       CASE WHEN r.creator_openid = $1 THEN COALESCE(j.nickname,'') ELSE COALESCE(u.nickname,'') END,
+		       CASE WHEN r.creator_openid = $1 THEN COALESCE(j.avatar_url,'') ELSE COALESCE(u.avatar_url,'') END,
+		       CASE WHEN r.creator_openid = $1 THEN r.score_creator ELSE r.score_joiner END,
+		       CASE WHEN r.creator_openid = $1 THEN r.score_joiner ELSE r.score_creator END,
+		       r.status, r.category, r.map_name, r.created_at
+		FROM wx_rooms r
+		JOIN wx_users u ON u.openid = r.creator_openid
+		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
+		WHERE r.creator_openid = $1 OR r.joiner_openid = $1
+		ORDER BY r.created_at DESC
+		LIMIT 100
+	`, openid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var records []MatchRecord
+	for rows.Next() {
+		var m MatchRecord
+		if err := rows.Scan(&m.ID, &m.Title, &m.OpponentName, &m.OpponentAvatar,
+			&m.MyScore, &m.OpponentScore, &m.Status, &m.Category, &m.MapName, &m.CreatedAt); err != nil {
+			return nil, err
+		}
+		records = append(records, m)
+	}
+	return records, rows.Err()
+}
+
 func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 	rows, err := s.pool.Query(ctx, `
 		SELECT r.id, r.title, r.creator_openid, COALESCE(u.nickname,'') AS creator_name,

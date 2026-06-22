@@ -80,6 +80,21 @@ func CreateRoom(s *store.Store) gin.HandlerFunc {
 	}
 }
 
+// MyMatches 返回当前登录用户参与过的所有比赛记录（任何状态都展示，不止已完成的）。
+func MyMatches(s *store.Store) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		records, err := s.ListMyMatches(c.Request.Context(), openid(c))
+		if err != nil {
+			resp.Fail(c, 500, "db error")
+			return
+		}
+		if records == nil {
+			records = []store.MatchRecord{}
+		}
+		resp.OK(c, records)
+	}
+}
+
 func JoinRoom(s *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		roomID := c.Param("id")
