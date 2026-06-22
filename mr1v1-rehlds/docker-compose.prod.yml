@@ -1,6 +1,6 @@
 services:
   rehlds:
-    image: registry-vpc.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.2.12
+    image: registry-vpc.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.3.0
     container_name: rehlds-1v1
     restart: unless-stopped
     network_mode: host
