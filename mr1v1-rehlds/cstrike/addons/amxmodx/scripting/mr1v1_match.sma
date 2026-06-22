@@ -854,9 +854,10 @@ bool:SelectMatchPlayers() {
 
 // 比赛开始时一次性公示规则：捡枪式，无强制武器
 AnnounceMatchRules() {
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛开始");
 	client_print_color(0, print_team_red, "^4[1v1] ^1本场比赛决胜方式：^3最多31回合，先到16胜");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1不发武器不限购买，一切按地图默认来，能买就买，捡到什么用什么");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入h可随时弹出命令菜单");
 }
 
 InitMatch(bool:selectPlayers = true) {
@@ -1086,26 +1087,20 @@ public Task_AnnounceMatchResult() {
 	get_user_name(g_iPlayer[0], name1, charsmax(name1));
 	get_user_name(g_iPlayer[1], name2, charsmax(name2));
 
-	new winner = -1;
-	if (g_iWins[0] > g_iWins[1]) {
-		winner = 0;
-	} else if (g_iWins[1] > g_iWins[0]) {
-		winner = 1;
-	}
+	// TOTAL_ROUNDS=31是奇数(2*WIN_THRESHOLD-1)，正常打满或提前分胜负都不可能出现平局，
+	// 这里只是兜底：万一两边胜场数相同(理论不会发生)，按胜场数比较取较大的一方，
+	// 真相等时默认判房主(slot0)赢，保证不会广播"平局"
+	new winner = (g_iWins[1] > g_iWins[0]) ? 1 : 0;
+
+	new winnerName[32];
+	get_user_name(g_iPlayer[winner], winnerName, charsmax(winnerName));
 
 	set_hudmessage(0, 255, 0, -1.0, 0.35, 0, 6.0, 6.0);
-	if (winner == -1) {
-		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！平局%d:%d", g_iWins[0], g_iWins[1]);
-		ShowSyncHudMsg(0, g_hudSync, "比赛结束！平局 %d:%d", g_iWins[0], g_iWins[1]);
-	} else {
-		new winnerName[32];
-		get_user_name(g_iPlayer[winner], winnerName, charsmax(winnerName));
-		client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！%s获胜！比分%d:%d", winnerName, g_iWins[0], g_iWins[1]);
-		ShowSyncHudMsg(0, g_hudSync, "比赛结束！%s 获胜 %d:%d", winnerName, g_iWins[0], g_iWins[1]);
+	client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！%s获胜！比分%d:%d", winnerName, g_iWins[0], g_iWins[1]);
+	ShowSyncHudMsg(0, g_hudSync, "比赛结束！%s 获胜 %d:%d", winnerName, g_iWins[0], g_iWins[1]);
 
-		new loser = 1 - winner;
-		client_print_color(g_iPlayer[loser], print_team_grey, "^4[1v1] ^1很遗憾你失败了，别气馁，再来一把干回来！");
-	}
+	new loser = 1 - winner;
+	client_print_color(g_iPlayer[loser], print_team_grey, "^4[1v1] ^1很遗憾你失败了，别气馁，再来一把干回来！");
 
 	log_amx("MR1V1_MATCH_END match_id=%s winner_slot=%d score=%d:%d p0=%d(%s) p1=%d(%s)",
 		g_szMatchId, winner, g_iWins[0], g_iWins[1], g_iPlayer[0], name1, g_iPlayer[1], name2);
