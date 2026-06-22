@@ -2,12 +2,12 @@
 // MR1V1 捡枪式比赛插件
 //
 // 规则：
-//   - 不分武器阶段，出生装备完全交给地图/引擎默认（不强制发武器、不强制清空背包、
-//     不清理地图自带武器/弹药拾取物），武器全靠地图拾取或击杀对手后捡枪
+//   - 完全不做武器/购买限制，出生装备、购买菜单、拾取/丢弃/死亡掉枪全部交给
+//     地图/引擎默认行为，插件不插手——地图设计本身决定了打法(比如aim_map这类
+//     给AK/M4的就是步枪图，sk_系列给USP的就是手枪图)，靠地图池分类而不是插件限制
 //   - 最多31回合，先达16胜者获胜，提前分出胜负即结束（无加时）
 //   - 队伍分边第1回合随机决定，之后每回合结束后无论胜负T/CT自动互换
 //   - 记分板T/CT回合数实时映射为"当前在该边的玩家的个人胜场数"，与自定义HUD比分保持一致
-//   - 购买菜单依旧禁用（不走经济系统），但允许拾取/丢弃/死亡掉枪
 //   - 比赛开始后 mp_freezetime 设为1秒
 //   - 比赛开始时一次性公示规则；回合结束显示双方本回合伤害
 //   - 启动方式：聊天 .start，或后台RCON执行 mr1v1_start
@@ -138,8 +138,6 @@ public plugin_init() {
 	register_srvcmd("mr1v1_match_destroy", "CmdRconDestroy");
 
 	RegisterHookChain(RG_CBasePlayer_Spawn, "CBasePlayer_Spawn_Post", true);
-	RegisterHookChain(RG_ShowVGUIMenu, "ShowVGUIMenu_Pre", false);
-	RegisterHookChain(RG_BuyWeaponByWeaponID, "BuyWeaponByWeaponID_Pre", false);
 	RegisterHookChain(RG_RoundEnd, "RoundEnd_Post", true);
 	RegisterHookChain(RG_HandleMenu_ChooseTeam, "HandleMenu_ChooseTeam_Pre", false);
 	set_task(1.0, "Task_EnforceSpectators", _, _, _, "b");
@@ -857,7 +855,7 @@ bool:SelectMatchPlayers() {
 // 比赛开始时一次性公示规则：捡枪式，无强制武器
 AnnounceMatchRules() {
 	client_print_color(0, print_team_red, "^4[1v1] ^1本场比赛决胜方式：^3最多31回合，先到16胜");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1出生不发武器，地图上捡到什么就用什么，击杀对手也可以捡走对方的枪");
+	client_print_color(0, print_team_grey, "^4[1v1] ^1不发武器不限购买，一切按地图默认来，能买就买，捡到什么用什么");
 	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入h可随时弹出命令菜单");
 }
 
@@ -939,8 +937,7 @@ public CBasePlayer_Spawn_Post(const id) {
 	}
 
 	if (g_bWarmupActive) {
-		// 热身不强制发装备，跟正式比赛一样交给引擎/地图默认；购买菜单热身期间
-		// 不受限(见ShowVGUIMenu_Pre/BuyWeaponByWeaponID_Pre)，想练哪把枪可以直接买
+		// 热身不强制发装备，跟正式比赛一样交给引擎/地图默认
 		return;
 	} else {
 		// 换边后在重生时刷新模型与记分板队伍颜色，此时旧尸体已不存在，无违和感；
@@ -950,30 +947,6 @@ public CBasePlayer_Spawn_Post(const id) {
 		log_amx("MR1V1_SPAWN round=%d slot=%d id=%d team_before=%d team_after=%d",
 			g_iRoundNum, GetSlot(id), id, before, _:g_eCurrentTeam[GetSlot(id)]);
 	}
-}
-
-// ------------------------------------------------------------
-// 禁止购买（捡枪模式下不限制拾取/丢弃/死亡掉枪，武器全靠地图/对手身上捡）
-// ------------------------------------------------------------
-
-public ShowVGUIMenu_Pre(const id, VGUIMenu:menuType) {
-	if (IsMatchPlayer(id) && !g_bWarmupActive) {
-		switch (menuType) {
-			case VGUI_Menu_Buy, VGUI_Menu_Buy_Pistol, VGUI_Menu_Buy_ShotGun, VGUI_Menu_Buy_Rifle,
-				 VGUI_Menu_Buy_SubMachineGun, VGUI_Menu_Buy_MachineGun, VGUI_Menu_Buy_Item: {
-				return HC_SUPERCEDE;
-			}
-		}
-	}
-	return HC_CONTINUE;
-}
-
-public BuyWeaponByWeaponID_Pre(const id) {
-	if (IsMatchPlayer(id) && !g_bWarmupActive) {
-		SetHookChainReturn(ATYPE_INTEGER, 0);
-		return HC_SUPERCEDE;
-	}
-	return HC_CONTINUE;
 }
 
 // ------------------------------------------------------------
