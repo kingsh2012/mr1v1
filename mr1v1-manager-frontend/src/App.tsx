@@ -2,7 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation } from
 import { Layout, Menu, Button } from 'antd'
 import {
   RobotOutlined, CloudServerOutlined, TrophyOutlined, LogoutOutlined,
-  HomeOutlined, TeamOutlined, IdcardOutlined,
+  HomeOutlined, TeamOutlined, IdcardOutlined, EnvironmentOutlined,
 } from '@ant-design/icons'
 import type { ReactNode } from 'react'
 import AgentsPage from './pages/AgentsPage'
@@ -11,6 +11,7 @@ import MatchesPage from './pages/MatchesPage'
 import WxRoomsPage from './pages/WxRoomsPage'
 import WxUsersPage from './pages/WxUsersPage'
 import LegacyPlayersPage from './pages/LegacyPlayersPage'
+import MapsPage from './pages/MapsPage'
 import LoginPage from './pages/LoginPage'
 import api from './api'
 
@@ -28,6 +29,7 @@ const pageRoutes: PageRoute[] = [
   { key: 'matches', path: 'matches', label: '比赛管理', icon: <TrophyOutlined />, element: <MatchesPage /> },
   { key: 'agents', path: 'agents', label: 'Agent 管理', icon: <RobotOutlined />, element: <AgentsPage /> },
   { key: 'rehlds', path: 'rehlds', label: 'Rehlds 镜像', icon: <CloudServerOutlined />, element: <RehldsConfigPage /> },
+  { key: 'maps', path: 'maps', label: '地图池', icon: <EnvironmentOutlined />, element: <MapsPage /> },
   { key: 'wx-rooms', path: 'wx-rooms', label: '房间列表', icon: <HomeOutlined />, element: <WxRoomsPage /> },
   { key: 'wx-users', path: 'wx-users', label: '微信用户', icon: <TeamOutlined />, element: <WxUsersPage /> },
   { key: 'legacy-players', path: 'legacy-players', label: '老玩家列表', icon: <IdcardOutlined />, element: <LegacyPlayersPage /> },

@@ -1,7 +1,8 @@
 #!/bin/bash
 # CS 1.6 1v1 server startup script
 # Usage: ./start.sh [extra hlds args]
-# 可通过环境变量覆盖（参考 .env.example）：SERVER_HOSTNAME, MAXPLAYERS, RCON_PASSWORD, PORT
+# 可通过环境变量覆盖（参考 .env.example）：SERVER_HOSTNAME, MAXPLAYERS, RCON_PASSWORD, PORT, MAP
+# MAP 由agent按局按地图池随机选定后注入(捡枪式赛制按手枪/步枪/狙击分池)，留空则用aim_map兜底
 
 # +ip 0.0.0.0：显式声明绑定地址，跳过引擎对容器hostname的gethostbyname()解析
 # （host网络模式下容器hostname无/etc/hosts记录，会报"Invalid hostname"警告），
@@ -70,7 +71,7 @@ fi
 
 exec "$SCRIPT_DIR/hlds_linux" \
   -game cstrike \
-  +map aim_map \
+  +map "${MAP:-aim_map}" \
   +maxplayers "${MAXPLAYERS:-10}" \
   +port "${PORT:-27015}" \
   -norestart \

@@ -61,6 +61,8 @@ type Spec struct {
 	// agent can later RCON into the container to trigger the destroy
 	// countdown (see AGENT_ARCHITECTURE_DESIGN.md section 6).
 	RCONPassword string
+	// Map 对应start.sh的MAP环境变量，见 agentproto.CreateCommand.Map。
+	Map string
 	// BotTestMode 仅供端到端测试使用，见 agentproto.CreateCommand.BotTestMode。
 	BotTestMode bool
 }
@@ -84,6 +86,9 @@ func (c *Client) CreateAndStart(ctx context.Context, spec Spec) (string, error) 
 	}
 	if spec.BotTestMode {
 		env = append(env, "BOT_TEST_MODE=1")
+	}
+	if spec.Map != "" {
+		env = append(env, "MAP="+spec.Map)
 	}
 
 	if err := c.ensureImage(ctx, spec.Image); err != nil {

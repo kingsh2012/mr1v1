@@ -190,6 +190,7 @@ func (a *Agent) createMatch(cmd agentproto.CreateCommand) {
 		Image:        image,
 		GatewayHTTP:  a.gatewayHTTPAddr(),
 		RCONPassword: rconPassword,
+		Map:          cmd.Map,
 		BotTestMode:  cmd.BotTestMode,
 	})
 	if err != nil {

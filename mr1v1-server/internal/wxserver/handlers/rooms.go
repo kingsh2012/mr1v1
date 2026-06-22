@@ -39,14 +39,21 @@ func ListRooms(s *store.Store) gin.HandlerFunc {
 	}
 }
 
+var validRoomCategories = map[string]bool{"pistol": true, "rifle": true, "sniper": true}
+
 func CreateRoom(s *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			Title    string `json:"title"`
 			Password string `json:"password"`
+			Category string `json:"category"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Title) == "" {
 			resp.Fail(c, 400, "title required")
+			return
+		}
+		if !validRoomCategories[req.Category] {
+			resp.Fail(c, 400, "category must be one of pistol/rifle/sniper")
 			return
 		}
 
@@ -62,7 +69,7 @@ func CreateRoom(s *store.Store) gin.HandlerFunc {
 		}
 
 		id := uuid.New().String()
-		if err := s.CreateRoom(c.Request.Context(), id, req.Title, oid, req.Password); err != nil {
+		if err := s.CreateRoom(c.Request.Context(), id, req.Title, oid, req.Password, req.Category); err != nil {
 			resp.Fail(c, 500, "db error")
 			return
 		}

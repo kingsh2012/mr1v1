@@ -84,6 +84,15 @@ var BackendStatements = []string{
 		created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW()
 	)`,
 	`CREATE INDEX IF NOT EXISTS idx_manager_operation_logs_match_id ON manager_operation_logs(match_id, created_at)`,
+	`CREATE TABLE IF NOT EXISTS manager_maps (
+		id         BIGSERIAL    PRIMARY KEY,
+		category   VARCHAR(16)  NOT NULL,
+		map_name   VARCHAR(64)  NOT NULL,
+		enabled    BOOLEAN      NOT NULL DEFAULT TRUE,
+		created_at TIMESTAMPTZ  NOT NULL DEFAULT NOW(),
+		UNIQUE (category, map_name)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_manager_maps_category ON manager_maps(category, enabled)`,
 	`CREATE TABLE IF NOT EXISTS legacy_players (
 		steam_id               TEXT PRIMARY KEY,
 		name                   TEXT NOT NULL DEFAULT '',

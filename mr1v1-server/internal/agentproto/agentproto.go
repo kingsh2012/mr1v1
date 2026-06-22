@@ -56,6 +56,9 @@ type CreateCommand struct {
 	P0SteamID  string `json:"p0_steamid"`
 	P1SteamID  string `json:"p1_steamid"`
 	Image      string `json:"image"`
+	// Map 由backend按比赛类型(手枪/步枪/狙击)从地图池随机选定，留空则容器内start.sh
+	// 用默认地图兜底
+	Map string `json:"map,omitempty"`
 	// BotTestMode 仅供端到端测试使用：为true时双方slot由2个Bot顶替，
 	// 无需真实玩家连入即可走完一整局比赛。正式排位赛不设置此字段。
 	BotTestMode bool `json:"bot_test_mode,omitempty"`

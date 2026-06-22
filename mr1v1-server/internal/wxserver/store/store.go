@@ -75,6 +75,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS score_creator INT NOT NULL DEFAULT 0;
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS score_joiner INT NOT NULL DEFAULT 0;
+		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'rifle';
 	`)
 	return err
 }
@@ -178,6 +179,8 @@ type Room struct {
 	CreatedAt     time.Time `json:"created_at"`
 	ScoreCreator  int       `json:"score_creator"`
 	ScoreJoiner   int       `json:"score_joiner"`
+	// Category 手枪/步枪/狙击(pistol/rifle/sniper)，决定建服时从哪个地图池随机选图
+	Category string `json:"category"`
 }
 
 func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {
@@ -188,10 +191,10 @@ func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) 
 	return count > 0, err
 }
 
-func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, password string) error {
+func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, password, category string) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO wx_rooms (id, title, creator_openid, password) VALUES ($1, $2, $3, $4)
-	`, id, title, creatorOpenID, password)
+		INSERT INTO wx_rooms (id, title, creator_openid, password, category) VALUES ($1, $2, $3, $4, $5)
+	`, id, title, creatorOpenID, password, category)
 	return err
 }
 
@@ -202,7 +205,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		       COALESCE(r.joiner_openid,'') AS joiner_openid,
 		       COALESCE(j.nickname,'') AS joiner_name,
 		       COALESCE(j.avatar_url,'') AS joiner_avatar,
-		       r.password != '' AS locked, r.status, r.created_at, r.score_creator, r.score_joiner
+		       r.password != '' AS locked, r.status, r.created_at, r.score_creator, r.score_joiner, r.category
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
@@ -221,7 +224,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		var rm Room
 		if err := rows.Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
 			&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
-			&rm.Locked, &rm.Status, &rm.CreatedAt, &rm.ScoreCreator, &rm.ScoreJoiner); err != nil {
+			&rm.Locked, &rm.Status, &rm.CreatedAt, &rm.ScoreCreator, &rm.ScoreJoiner, &rm.Category); err != nil {
 			return nil, err
 		}
 		rooms = append(rooms, rm)
@@ -237,14 +240,14 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 		       COALESCE(u.avatar_url,''),
 		       COALESCE(r.joiner_openid,''), COALESCE(j.nickname,''),
 		       COALESCE(j.avatar_url,''),
-		       r.password, r.status
+		       r.password, r.status, r.category
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
 		WHERE r.id = $1 AND r.deleted_at IS NULL
 	`, id).Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
 		&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
-		&password, &rm.Status)
+		&password, &rm.Status, &rm.Category)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}

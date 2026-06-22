@@ -1,23 +1,20 @@
 // ============================================================
-// MR1V1 武器轮换比赛插件
+// MR1V1 捡枪式比赛插件
 //
 // 规则：
-//   - 最多51回合(10手枪/28步枪/13狙击)，先达26胜者获胜，提前分出胜负即结束（无加时）
+//   - 不分武器阶段，出生装备完全交给地图/引擎默认（不强制发武器、不强制清空背包、
+//     不清理地图自带武器/弹药拾取物），武器全靠地图拾取或击杀对手后捡枪
+//   - 最多31回合，先达16胜者获胜，提前分出胜负即结束（无加时）
 //   - 队伍分边第1回合随机决定，之后每回合结束后无论胜负T/CT自动互换
 //   - 记分板T/CT回合数实时映射为"当前在该边的玩家的个人胜场数"，与自定义HUD比分保持一致
-//   - 第1-10回合：手枪局，半甲，默认USP，.1=USP .2=格洛克 .3=沙漠之鹰
-//   - 第11-38回合：步枪局，全甲，默认AK47，.1=AK47 .2=M4A1 .3=法玛斯 .4=加利尔
-//   - 第39-51回合：狙击局，全甲，默认AWP，.1=AWP .2=鸟狙（另发副武器手枪：CT=USP T=格洛克）
-//   - .1/.2/.3/.4 选择按阶段记忆，进入新阶段重置为默认武器；.guns 弹出菜单按当前阶段选择
-//   - 每回合开始强制清空背包并按阶段+偏好重发武器/满弹/护甲，无手雷
-//   - 禁止购买菜单/丢弃/拾取/死亡掉枪；地图自带武器/弹药拾取物持续清除
-//   - 比赛开始后 mp_freezetime 设为2秒，结束后恢复为0
-//   - 比赛开始时一次性公示回合机制+各阶段武器选项；回合结束显示双方本回合伤害
+//   - 购买菜单依旧禁用（不走经济系统），但允许拾取/丢弃/死亡掉枪
+//   - 比赛开始后 mp_freezetime 设为1秒
+//   - 比赛开始时一次性公示规则；回合结束显示双方本回合伤害
 //   - 启动方式：聊天 .start，或后台RCON执行 mr1v1_start
 //   - 停止比赛：聊天 .stop，或后台RCON执行 mr1v1_stop
 //   - 换图：聊天 .map 弹出内置1v1地图菜单，或 .map <地图名> 直接指定（比赛进行中无法换图），3秒后切换
 //   - 聊天框输入 h 弹出命令菜单（按当前比赛状态显示.start/.start_bot/.start_bot_test/.map
-//     或.guns/.stop），免去记忆具体指令
+//     或.stop），免去记忆具体指令
 //   - 比赛进行中加入的第三人自动设为观察者
 //   - 对战玩家掉线后60秒内重连(SteamID匹配)可恢复比赛，超时则自动取消
 //   - 比赛开始/每回合结束/比赛结束 通过 HTTP POST 上报到 gateway（见 configs/mr1v1.ini）
@@ -34,62 +31,22 @@
 #include <easy_http>
 
 #define PLUGIN_NAME    "MR1V1 Match"
-#define PLUGIN_VERSION "1.0"
+#define PLUGIN_VERSION "2.0"
 #define PLUGIN_AUTHOR  "1v1 Platform"
 
-#define TOTAL_ROUNDS     51
-#define WIN_THRESHOLD    26
-#define PHASE_PISTOL_END 10
-#define PHASE_RIFLE_END  38
-
-enum MatchPhase {
-	PHASE_PISTOL = 0,
-	PHASE_RIFLE,
-	PHASE_SNIPER
-};
-
-// 武器表索引
-#define WPN_USP     0
-#define WPN_GLOCK18 1
-#define WPN_DEAGLE  2
-#define WPN_AK47    3
-#define WPN_M4A1    4
-#define WPN_AWP     5
-#define WPN_SCOUT   6
-#define WPN_FAMAS   7
-#define WPN_GALIL   8
-
-enum _:WeaponEntry {
-	WPN_CLASSNAME[32],
-	WeaponIdType:WPN_ID,
-	WPN_DISPLAY[16]
-};
-
-new const g_weaponTable[][WeaponEntry] = {
-	{"weapon_usp",     WEAPON_USP,     "USP"},
-	{"weapon_glock18", WEAPON_GLOCK18, "格洛克"},
-	{"weapon_deagle",  WEAPON_DEAGLE,  "沙漠之鹰"},
-	{"weapon_ak47",    WEAPON_AK47,    "AK-47"},
-	{"weapon_m4a1",    WEAPON_M4A1,    "M4A1"},
-	{"weapon_awp",     WEAPON_AWP,     "AWP"},
-	{"weapon_scout",   WEAPON_SCOUT,   "鸟狙"},
-	{"weapon_famas",   WEAPON_FAMAS,   "法玛斯"},
-	{"weapon_galil",   WEAPON_GALIL,   "加利尔"}
-};
+#define TOTAL_ROUNDS     31
+#define WIN_THRESHOLD    16
 
 new bool:g_bMatchActive;
 new bool:g_bTestMode;
 new g_iRoundNum;
-new MatchPhase:g_ePhase;
 new g_iPlayer[2];
 new TeamName:g_eCurrentTeam[2];
 new g_iWins[2];
-new g_iWeaponChoice[MAX_PLAYERS + 1][3];
 new g_szAuthId[2][35];
 new g_szPlayerName[2][32];
 new bool:g_bPendingReconnect[2];
 new g_iLastRoundNum;
-new MatchPhase:g_eLastPhase;
 new g_iLastWinnerSlot;
 
 new bool:g_bWarmupActive;
@@ -103,7 +60,6 @@ new g_iForceRespawnOld;
 new Float:g_flRespawnImmunityOld;
 #define TASK_WARMUP_TIMER 7777
 
-new HookChain:g_hookAddItem;
 new g_hudSync;
 new g_hudWarmupSync;
 new g_hFwdMatchEnd;
@@ -162,16 +118,6 @@ public plugin_init() {
 	register_clcmd("say_team .start_bot", "CmdStartBot");
 	register_clcmd("say .start_bot_test", "CmdStartBotTest");
 	register_clcmd("say_team .start_bot_test", "CmdStartBotTest");
-	register_clcmd("say .1", "CmdChoice1");
-	register_clcmd("say_team .1", "CmdChoice1");
-	register_clcmd("say .2", "CmdChoice2");
-	register_clcmd("say_team .2", "CmdChoice2");
-	register_clcmd("say .3", "CmdChoice3");
-	register_clcmd("say_team .3", "CmdChoice3");
-	register_clcmd("say .4", "CmdChoice4");
-	register_clcmd("say_team .4", "CmdChoice4");
-	register_clcmd("say .guns", "CmdGuns");
-	register_clcmd("say_team .guns", "CmdGuns");
 	register_clcmd("say .stop", "CmdStop");
 	register_clcmd("say_team .stop", "CmdStop");
 	register_clcmd("say .refresh", "CmdRefresh");
@@ -191,14 +137,9 @@ public plugin_init() {
 	// 广播倒计时后踢出所有玩家，agent随后docker stop/rm销毁本容器
 	register_srvcmd("mr1v1_match_destroy", "CmdRconDestroy");
 
-	g_hookAddItem = RegisterHookChain(RG_CBasePlayer_AddPlayerItem, "CBasePlayer_AddPlayerItem_Pre", false);
 	RegisterHookChain(RG_CBasePlayer_Spawn, "CBasePlayer_Spawn_Post", true);
-	RegisterHookChain(RG_CBasePlayer_OnSpawnEquip, "CBasePlayer_OnSpawnEquip_Pre", false);
-	RegisterHookChain(RG_CBasePlayer_HasRestrictItem, "CBasePlayer_HasRestrictItem_Pre", false);
 	RegisterHookChain(RG_ShowVGUIMenu, "ShowVGUIMenu_Pre", false);
 	RegisterHookChain(RG_BuyWeaponByWeaponID, "BuyWeaponByWeaponID_Pre", false);
-	RegisterHookChain(RG_CBasePlayer_DropPlayerItem, "CBasePlayer_DropPlayerItem_Pre", false);
-	RegisterHookChain(RG_CSGameRules_DeadPlayerWeapons, "CSGameRules_DeadPlayerWeapons_Pre", false);
 	RegisterHookChain(RG_RoundEnd, "RoundEnd_Post", true);
 	RegisterHookChain(RG_HandleMenu_ChooseTeam, "HandleMenu_ChooseTeam_Pre", false);
 	set_task(1.0, "Task_EnforceSpectators", _, _, _, "b");
@@ -218,10 +159,6 @@ public plugin_init() {
 	LoadGatewayConfig();
 	LoadMatchModeConfig();
 	get_mapname(g_szMapName, charsmax(g_szMapName));
-
-	// 部分地图自带武器/弹药拾取物（如 ak47_m4a1_dust），持续清除（含拾取后重新生成的情况），
-	// 避免与按阶段强制重发装备的规则冲突，同时不让玩家看到地图自带枪械模型
-	set_task(2.0, "Task_RemoveMapWeapons", _, _, _, "b");
 
 	// 每日定时硬重启（容器时区为Asia/Shanghai，见Dockerfile），首次延迟到下一个5点触发
 	set_task(float(SecondsUntilNextDailyRestart()), "Task_DailyRestart");
@@ -342,39 +279,6 @@ LoadMatchModeConfig() {
 }
 
 // ------------------------------------------------------------
-// 清除地图自带的武器/弹药拾取实体
-// ------------------------------------------------------------
-
-public Task_RemoveMapWeapons() {
-	// 仅在正式回合中清理地图自带武器/弹药；非比赛/热身期间不清理，
-	// 否则会把玩家手持/背包中的武器实体一并误删，导致出生没有武器
-	if (!g_bMatchActive || g_bWarmupActive) {
-		return;
-	}
-
-	new classname[32], removed = 0;
-
-	for (new ent = 1; ent < entity_count(); ent++) {
-		if (!is_valid_ent(ent))
-			continue;
-
-		// 跳过有主人的武器实体（玩家手持/背包中的武器），只清理地图上无主的拾取物
-		if (pev(ent, pev_owner))
-			continue;
-
-		pev(ent, pev_classname, classname, charsmax(classname));
-
-		if (equal(classname, "weapon_", 7) || equal(classname, "ammo_", 5)) {
-			rg_remove_entity(ent);
-			removed++;
-		}
-	}
-
-	if (removed > 0)
-		log_amx("MR1V1: removed %d map weapon/ammo entities", removed);
-}
-
-// ------------------------------------------------------------
 // 启动命令
 // ------------------------------------------------------------
 
@@ -492,11 +396,6 @@ public Task_StartMatch() {
 	}
 }
 
-public CmdChoice1(const id) { SetWeaponChoice(id, 1); return PLUGIN_HANDLED; }
-public CmdChoice2(const id) { SetWeaponChoice(id, 2); return PLUGIN_HANDLED; }
-public CmdChoice3(const id) { SetWeaponChoice(id, 3); return PLUGIN_HANDLED; }
-public CmdChoice4(const id) { SetWeaponChoice(id, 4); return PLUGIN_HANDLED; }
-
 public CmdStop(const id) {
 	new name[32];
 	get_user_name(id, name, charsmax(name));
@@ -610,9 +509,6 @@ ShowHelpMenu(const id) {
 			menu_additem(menu, "硬重启服务器 (.hardreset)", "hardreset", 0);
 		}
 	} else {
-		if (!g_bWarmupActive && IsMatchPlayer(id)) {
-			menu_additem(menu, "选择武器 (.guns)", "guns", 0);
-		}
 		menu_additem(menu, "停止比赛 (.stop)", "stop", 0);
 	}
 
@@ -637,8 +533,6 @@ public HelpMenuHandler(const id, menu, item) {
 		CmdStartBotTest(id);
 	} else if (equal(action, "map")) {
 		ShowMapMenu(id);
-	} else if (equal(action, "guns")) {
-		ShowGunsMenu(id);
 	} else if (equal(action, "stop")) {
 		CmdStop(id);
 	} else if (equal(action, "refresh")) {
@@ -675,9 +569,7 @@ public CmdSay(const id) {
 		CmdMap(id, text[5]);
 	} else if (strlen(text) && text[0] == '.' && !equal(text, ".start") && !equal(text, ".start_bot")
 		&& !equal(text, ".start_bot_test") && !equal(text, ".stop") && !equal(text, ".refresh")
-		&& !equal(text, ".hardreset")
-		&& !equal(text, ".1") && !equal(text, ".2") && !equal(text, ".3") && !equal(text, ".4")
-		&& !equal(text, ".guns")) {
+		&& !equal(text, ".hardreset")) {
 		// 调试：记录无法识别的"."开头指令，便于排查玩家输入但插件未响应的情况
 		new name[32];
 		get_user_name(id, name, charsmax(name));
@@ -835,17 +727,6 @@ EndWarmup() {
 	InitMatch(false);
 }
 
-// 给热身玩家发放练习装备：AK47+USP+全甲，无手雷，购买/拾取/丢弃不受限
-EquipPlayerForWarmup(const id) {
-	rg_remove_all_items(id);
-	rg_set_user_armor(id, 100, ARMOR_VESTHELM);
-
-	rg_give_item(id, "weapon_knife", GT_APPEND);
-
-	GiveWeaponFullAmmo(id, WPN_AK47);
-	GiveWeaponFullAmmo(id, WPN_USP);
-}
-
 // ------------------------------------------------------------
 // 比赛流程
 // ------------------------------------------------------------
@@ -876,9 +757,6 @@ bool:SelectMatchModePlayers() {
 	get_user_name(g_iPlayer[1], selName1, charsmax(selName1));
 	copy(g_szPlayerName[0], charsmax(g_szPlayerName[]), selName0);
 	copy(g_szPlayerName[1], charsmax(g_szPlayerName[]), selName1);
-
-	arrayset(g_iWeaponChoice[g_iPlayer[0]], 0, 3);
-	arrayset(g_iWeaponChoice[g_iPlayer[1]], 0, 3);
 
 	rg_set_user_team(g_iPlayer[0], g_eCurrentTeam[0], MODEL_AUTO, true, false);
 	rg_set_user_team(g_iPlayer[1], g_eCurrentTeam[1], MODEL_AUTO, true, false);
@@ -953,9 +831,6 @@ bool:SelectMatchPlayers() {
 	log_amx("MR1V1_SELECT_RESULT p0=%d(%s,%s) p1=%d(%s,%s)",
 		g_iPlayer[0], selName0, g_szAuthId[0], g_iPlayer[1], selName1, g_szAuthId[1]);
 
-	arrayset(g_iWeaponChoice[g_iPlayer[0]], 0, 3);
-	arrayset(g_iWeaponChoice[g_iPlayer[1]], 0, 3);
-
 	if (random(2) == 0) {
 		g_eCurrentTeam[0] = TEAM_TERRORIST;
 		g_eCurrentTeam[1] = TEAM_CT;
@@ -979,11 +854,10 @@ bool:SelectMatchPlayers() {
 	return true;
 }
 
-// 比赛开始时一次性公示规则：回合机制 + 各阶段武器选择
+// 比赛开始时一次性公示规则：捡枪式，无强制武器
 AnnounceMatchRules() {
-	client_print_color(0, print_team_red, "^4[1v1] ^1本场比赛决胜方式：10手枪、28步枪、13狙击，^3共51回合26胜");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入^4.guns^1唤起武器选择菜单，或直接输入下面.1 .2 .3可快速切枪");
-	client_print_color(0, print_team_grey, "^4[1v1] ^1手枪局:^4.1^1=USP(默认) ^4.2^1=格洛克 ^4.3^1=沙漠之鹰");
+	client_print_color(0, print_team_red, "^4[1v1] ^1本场比赛决胜方式：^3最多31回合，先到16胜");
+	client_print_color(0, print_team_grey, "^4[1v1] ^1出生不发武器，地图上捡到什么就用什么，击杀对手也可以捡走对方的枪");
 	client_print_color(0, print_team_grey, "^4[1v1] ^1聊天框输入h可随时弹出命令菜单");
 }
 
@@ -995,7 +869,6 @@ InitMatch(bool:selectPlayers = true) {
 	g_iWins[0] = 0;
 	g_iWins[1] = 0;
 	g_iRoundNum = 1;
-	g_ePhase = PHASE_PISTOL;
 	g_bMatchActive = true;
 	g_bWarmupActive = false;
 	g_bPendingReconnect[0] = false;
@@ -1066,188 +939,22 @@ public CBasePlayer_Spawn_Post(const id) {
 	}
 
 	if (g_bWarmupActive) {
-		EquipPlayerForWarmup(id);
+		// 热身不强制发装备，跟正式比赛一样交给引擎/地图默认；购买菜单热身期间
+		// 不受限(见ShowVGUIMenu_Pre/BuyWeaponByWeaponID_Pre)，想练哪把枪可以直接买
+		return;
 	} else {
-		// 换边后在重生时刷新模型与记分板队伍颜色，此时旧尸体已不存在，无违和感
+		// 换边后在重生时刷新模型与记分板队伍颜色，此时旧尸体已不存在，无违和感；
+		// 出生装备完全交给引擎/地图默认，不再由插件强制发武器
 		new before = get_member(id, m_iTeam);
 		rg_set_user_team(id, g_eCurrentTeam[GetSlot(id)], MODEL_AUTO, true, false);
 		log_amx("MR1V1_SPAWN round=%d slot=%d id=%d team_before=%d team_after=%d",
 			g_iRoundNum, GetSlot(id), id, before, _:g_eCurrentTeam[GetSlot(id)]);
-		EquipPlayerForCurrentRound(id);
 	}
-}
-
-public CBasePlayer_OnSpawnEquip_Pre(const id) {
-	if (IsMatchPlayer(id)) {
-		return HC_SUPERCEDE;
-	}
-	return HC_CONTINUE;
-}
-
-GetWeaponIndexForChoice(MatchPhase:phase, const choice) {
-	switch (phase) {
-		case PHASE_PISTOL: {
-			switch (choice) {
-				case 2: return WPN_GLOCK18;
-				case 3: return WPN_DEAGLE;
-				default: return WPN_USP;
-			}
-		}
-		case PHASE_RIFLE: {
-			switch (choice) {
-				case 2: return WPN_M4A1;
-				case 3: return WPN_FAMAS;
-				case 4: return WPN_GALIL;
-				default: return WPN_AK47;
-			}
-		}
-		case PHASE_SNIPER: {
-			switch (choice) {
-				case 2: return WPN_SCOUT;
-				default: return WPN_AWP;
-			}
-		}
-	}
-
-	return WPN_USP;
-}
-
-GetWeaponIndexForPhase(const id) {
-	return GetWeaponIndexForChoice(g_ePhase, g_iWeaponChoice[id][_:g_ePhase]);
-}
-
-GetMaxChoiceForPhase(MatchPhase:phase) {
-	switch (phase) {
-		case PHASE_PISTOL: return 3;
-		case PHASE_RIFLE:  return 4;
-		default:           return 2;
-	}
-	return 2;
-}
-
-// 副武器(手枪)：从手枪局开始可通过 .1/.2/.3 切换(g_iWeaponChoice记录在PHASE_PISTOL)，
-// 该选择不会随阶段切换被重置，因此步枪局/狙击局的副武器沿用同一份选择
-GetSecondaryPistolIndex(const id) {
-	switch (g_iWeaponChoice[id][_:PHASE_PISTOL]) {
-		case 2: return WPN_GLOCK18;
-		case 3: return WPN_DEAGLE;
-	}
-
-	return WPN_USP;
-}
-
-GiveWeaponFullAmmo(const id, const wpnIdx) {
-	new ent = rg_give_item(id, g_weaponTable[wpnIdx][WPN_CLASSNAME], GT_APPEND);
-	if (ent > 0) {
-		new maxAmmo = rg_get_iteminfo(ent, ItemInfo_iMaxAmmo1);
-		rg_set_user_bpammo(id, g_weaponTable[wpnIdx][WPN_ID], maxAmmo);
-	}
-}
-
-EquipPlayerForCurrentRound(const id) {
-	rg_remove_all_items(id);
-
-	new ArmorType:armor = (g_ePhase == PHASE_PISTOL) ? ARMOR_KEVLAR : ARMOR_VESTHELM;
-	rg_set_user_armor(id, 100, armor);
-
-	new wpnIdx = GetWeaponIndexForPhase(id);
-
-	DisableHookChain(g_hookAddItem);
-
-	rg_give_item(id, "weapon_knife", GT_APPEND);
-	GiveWeaponFullAmmo(id, wpnIdx);
-
-	// 步枪局/狙击局额外携带副武器(手枪)，沿用手枪局的 .1/.2/.3 选择
-	if (g_ePhase != PHASE_PISTOL) {
-		GiveWeaponFullAmmo(id, GetSecondaryPistolIndex(id));
-	}
-
-	EnableHookChain(g_hookAddItem);
-
-	// 强制切换为本阶段主武器，避免Bot/玩家出生后停留在小刀或副武器上
-	client_cmd(id, g_weaponTable[wpnIdx][WPN_CLASSNAME]);
-
-	new name[32];
-	get_user_name(id, name, charsmax(name));
-
-	log_amx("MR1V1 round=%d phase=%d player=%s(%d) team=%d weapon=%s armor=%d",
-		g_iRoundNum, _:g_ePhase, name, id, _:g_eCurrentTeam[GetSlot(id)],
-		g_weaponTable[wpnIdx][WPN_CLASSNAME], _:armor);
 }
 
 // ------------------------------------------------------------
-// 武器选择
+// 禁止购买（捡枪模式下不限制拾取/丢弃/死亡掉枪，武器全靠地图/对手身上捡）
 // ------------------------------------------------------------
-
-SetWeaponChoice(const id, const choice) {
-	if (!IsMatchPlayer(id) || g_bWarmupActive) {
-		return;
-	}
-
-	new maxChoice = GetMaxChoiceForPhase(g_ePhase);
-	if (choice > maxChoice) {
-		client_print_color(id, print_team_grey, "^4[1v1] ^1当前阶段没有.%d这个选项", choice);
-		return;
-	}
-
-	new name[32];
-	get_user_name(id, name, charsmax(name));
-	log_amx("MR1V1_CMD_CHOICE by=%s(%d) phase=%d choice=%d alive=%d", name, id, _:g_ePhase, choice, is_user_alive(id));
-
-	g_iWeaponChoice[id][_:g_ePhase] = choice;
-
-	new wpnIdx = GetWeaponIndexForPhase(id);
-	client_print_color(id, print_team_grey, "^4[1v1] ^1已选择武器:%s（下回合/复活后生效）", g_weaponTable[wpnIdx][WPN_DISPLAY]);
-
-	if (is_user_alive(id)) {
-		EquipPlayerForCurrentRound(id);
-	}
-}
-
-// .guns：弹出菜单按当前阶段选择武器，等价于直接执行对应的 .1/.2/.3/.4
-public CmdGuns(const id) {
-	if (!IsMatchPlayer(id) || g_bWarmupActive) {
-		return PLUGIN_HANDLED;
-	}
-
-	ShowGunsMenu(id);
-	return PLUGIN_HANDLED;
-}
-
-ShowGunsMenu(const id) {
-	new menu = menu_create("\y[1v1] 选择武器", "GunsMenuHandler");
-
-	new maxChoice = GetMaxChoiceForPhase(g_ePhase);
-	for (new choice = 1; choice <= maxChoice; choice++) {
-		new wpnIdx = GetWeaponIndexForChoice(g_ePhase, choice);
-		menu_additem(menu, g_weaponTable[wpnIdx][WPN_DISPLAY], "", 0);
-	}
-
-	menu_display(id, menu, 0);
-}
-
-public GunsMenuHandler(const id, menu, item) {
-	if (item == MENU_EXIT) {
-		menu_destroy(menu);
-		return PLUGIN_HANDLED;
-	}
-
-	menu_destroy(menu);
-	SetWeaponChoice(id, item + 1);
-	return PLUGIN_HANDLED;
-}
-
-// ------------------------------------------------------------
-// 禁止购买/丢弃/拾取
-// ------------------------------------------------------------
-
-public CBasePlayer_HasRestrictItem_Pre(const id) {
-	if (IsMatchPlayer(id) && !g_bWarmupActive) {
-		SetHookChainReturn(ATYPE_BOOL, true);
-		return HC_SUPERCEDE;
-	}
-	return HC_CONTINUE;
-}
 
 public ShowVGUIMenu_Pre(const id, VGUIMenu:menuType) {
 	if (IsMatchPlayer(id) && !g_bWarmupActive) {
@@ -1269,32 +976,8 @@ public BuyWeaponByWeaponID_Pre(const id) {
 	return HC_CONTINUE;
 }
 
-public CBasePlayer_DropPlayerItem_Pre(const id) {
-	if (IsMatchPlayer(id) && !g_bWarmupActive) {
-		SetHookChainReturn(ATYPE_INTEGER, 0);
-		return HC_SUPERCEDE;
-	}
-	return HC_CONTINUE;
-}
-
-public CBasePlayer_AddPlayerItem_Pre(const id) {
-	if (IsMatchPlayer(id) && !g_bWarmupActive) {
-		SetHookChainReturn(ATYPE_INTEGER, 0);
-		return HC_SUPERCEDE;
-	}
-	return HC_CONTINUE;
-}
-
-public CSGameRules_DeadPlayerWeapons_Pre(const id) {
-	if (IsMatchPlayer(id) && !g_bWarmupActive) {
-		SetHookChainReturn(ATYPE_INTEGER, GR_PLR_DROP_GUN_NO);
-		return HC_SUPERCEDE;
-	}
-	return HC_CONTINUE;
-}
-
 // ------------------------------------------------------------
-// 回合结束：计分 / 换边 / 阶段切换
+// 回合结束：计分 / 换边
 // ------------------------------------------------------------
 
 public RoundEnd_Post(WinStatus:status, ScenarioEventEndRound:event) {
@@ -1316,12 +999,11 @@ public RoundEnd_Post(WinStatus:status, ScenarioEventEndRound:event) {
 	ShowScore();
 
 	g_iLastRoundNum = g_iRoundNum;
-	g_eLastPhase = g_ePhase;
 	g_iLastWinnerSlot = winnerSlot;
 	set_task(0.3, "Task_RoundDamage");
 
-	log_amx("MR1V1 round_end round=%d phase=%d status=%d winner_slot=%d wins=%d:%d",
-		g_iRoundNum, _:g_ePhase, _:status, winnerSlot, g_iWins[0], g_iWins[1]);
+	log_amx("MR1V1 round_end round=%d status=%d winner_slot=%d wins=%d:%d",
+		g_iRoundNum, _:status, winnerSlot, g_iWins[0], g_iWins[1]);
 
 	if (g_iRoundNum >= TOTAL_ROUNDS || g_iWins[0] >= WIN_THRESHOLD || g_iWins[1] >= WIN_THRESHOLD) {
 		UpdateNativeTeamScores();
@@ -1343,7 +1025,6 @@ public Task_AfterRoundEnd() {
 	SwapSides();
 
 	g_iRoundNum++;
-	AdvancePhaseIfNeeded();
 }
 
 // 每回合结束后无论胜负都换边：仅切换内部队伍标记和出生点归属(MODEL_UNASSIGNED不刷新模型)，
@@ -1374,34 +1055,6 @@ UpdateNativeTeamScores() {
 		tsWins = g_iWins[0];
 	}
 	rg_update_teamscores(ctsWins, tsWins, false);
-}
-
-AdvancePhaseIfNeeded() {
-	new MatchPhase:newPhase;
-
-	if (g_iRoundNum <= PHASE_PISTOL_END) {
-		newPhase = PHASE_PISTOL;
-	} else if (g_iRoundNum <= PHASE_RIFLE_END) {
-		newPhase = PHASE_RIFLE;
-	} else {
-		newPhase = PHASE_SNIPER;
-	}
-
-	if (newPhase != g_ePhase) {
-		g_ePhase = newPhase;
-
-		g_iWeaponChoice[g_iPlayer[0]][_:g_ePhase] = 0;
-		g_iWeaponChoice[g_iPlayer[1]][_:g_ePhase] = 0;
-
-		new const phaseNames[][] = {"手枪局", "步枪局", "狙击局"};
-		new const phaseWeaponInfo[][] = {
-			"^4.1^1=USP(默认) ^4.2^1=格洛克 ^4.3^1=沙漠之鹰",
-			"^4.1^1=AK47(默认) ^4.2^1=M4A1 ^4.3^1=法玛斯 ^4.4^1=加利尔",
-			"^4.1^1=AWP(默认) ^4.2^1=鸟狙"
-		};
-		client_print_color(0, print_team_grey, "^4[1v1] ^1%s:%s", phaseNames[_:g_ePhase], phaseWeaponInfo[_:g_ePhase]);
-		log_amx("MR1V1_PHASE_CHANGE round=%d new_phase=%d", g_iRoundNum, _:g_ePhase);
-	}
 }
 
 // ------------------------------------------------------------
@@ -1539,17 +1192,14 @@ AbortMatch(const reason[], const endReason[]) {
 	ResetMatchState();
 }
 
-// 清空比分/回合/阶段/武器选择等比赛状态，移除比赛Bot，并刷新当前地图（不换图）
+// 清空比分/回合等比赛状态，移除比赛Bot，并刷新当前地图（不换图）
 // 比赛正常结束(Task_AnnounceMatchResult)和被中止(.stop/AbortMatch)后共用
 ResetMatchState() {
-	arrayset(g_iWeaponChoice[g_iPlayer[0]], 0, 3);
-	arrayset(g_iWeaponChoice[g_iPlayer[1]], 0, 3);
 	g_iPlayer[0] = 0;
 	g_iPlayer[1] = 0;
 	g_iWins[0] = 0;
 	g_iWins[1] = 0;
 	g_iRoundNum = 0;
-	g_ePhase = PHASE_PISTOL;
 	g_bPendingReconnect[0] = false;
 	g_bPendingReconnect[1] = false;
 
@@ -1863,7 +1513,9 @@ ReportRoundEnd(dmg0, hits0, dmg1, hits1) {
 
 	json_object_set_string(data, "match_id", g_szMatchId);
 	json_object_set_number(data, "round", g_iLastRoundNum);
-	json_object_set_number(data, "phase", _:g_eLastPhase);
+	// phase字段保留兼容旧上报格式(consumer的envelope.RoundEnd结构体仍有该字段)，
+	// 捡枪模式不分阶段，固定上报0
+	json_object_set_number(data, "phase", 0);
 	json_object_set_number(data, "winner_slot", g_iLastWinnerSlot);
 	json_object_set_number(data, "wins0", g_iWins[0]);
 	json_object_set_number(data, "wins1", g_iWins[1]);

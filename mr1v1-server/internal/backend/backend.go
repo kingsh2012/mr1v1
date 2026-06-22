@@ -195,6 +195,11 @@ func (b *Backend) Handler(prefix string) http.Handler {
 	api.GET("/rehlds-configs", b.handleListRehldsConfigs)
 	api.POST("/rehlds-configs", b.handleCreateRehldsConfig)
 	api.PATCH("/rehlds-configs/:id/activate", b.handleActivateRehldsConfig)
+	// 地图池（捡枪式赛制按手枪/步枪/狙击分类，建服时按category随机选图）
+	api.GET("/maps", b.handleListMaps)
+	api.POST("/maps", b.handleCreateMap)
+	api.PATCH("/maps/:id", b.handleUpdateMap)
+	api.DELETE("/maps/:id", b.handleDeleteMap)
 	// 认证（免鉴权）
 	api.POST("/auth/login", b.handleLogin)
 	api.POST("/auth/logout", b.handleLogout)
@@ -264,6 +269,8 @@ type createMatchRequest struct {
 	P0SteamID  string `json:"p0_steamid"`
 	P1SteamID  string `json:"p1_steamid"`
 	ServerName string `json:"server_name"`
+	// Category 手枪/步枪/狙击，决定从哪个地图池随机选图；为空则不指定地图(走容器默认兜底)
+	Category string `json:"category,omitempty"`
 	// BotTestMode 仅供端到端测试使用，见 agentproto.CreateCommand.BotTestMode。
 	BotTestMode bool `json:"bot_test_mode,omitempty"`
 }
@@ -312,6 +319,8 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 		serverName = fmt.Sprintf("mr1v1 1v1 #%s", matchID[:8])
 	}
 
+	mapName := b.pickRandomMap(ctx, req.Category)
+
 	cmd := agentproto.CreateCommand{
 		MatchID:     matchID,
 		ServerName:  serverName,
@@ -319,6 +328,7 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 		P0SteamID:   req.P0SteamID,
 		P1SteamID:   req.P1SteamID,
 		Image:       image,
+		Map:         mapName,
 		BotTestMode: req.BotTestMode,
 	}
 	payload, _ := json.Marshal(cmd)
@@ -826,6 +836,120 @@ func (b *Backend) handleActivateRehldsConfig(c *gin.Context) {
 		return
 	}
 	resp.OK(c, gin.H{"status": "ok"})
+}
+
+// ── 地图池（捡枪式赛制按手枪/步枪/狙击分类，建服时按category随机选图） ──────────
+
+type mapRow struct {
+	ID        int64     `json:"id"`
+	Category  string    `json:"category"`
+	MapName   string    `json:"map_name"`
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (b *Backend) handleListMaps(c *gin.Context) {
+	query := `SELECT id, category, map_name, enabled, created_at FROM manager_maps`
+	var rows pgx.Rows
+	var err error
+	if category := c.Query("category"); category != "" {
+		rows, err = b.pool.Query(c.Request.Context(), query+` WHERE category=$1 ORDER BY category, map_name`, category)
+	} else {
+		rows, err = b.pool.Query(c.Request.Context(), query+` ORDER BY category, map_name`)
+	}
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	defer rows.Close()
+
+	var result []mapRow
+	for rows.Next() {
+		var m mapRow
+		if err := rows.Scan(&m.ID, &m.Category, &m.MapName, &m.Enabled, &m.CreatedAt); err != nil {
+			continue
+		}
+		result = append(result, m)
+	}
+	if result == nil {
+		result = []mapRow{}
+	}
+	resp.OK(c, result)
+}
+
+func (b *Backend) handleCreateMap(c *gin.Context) {
+	var req struct {
+		Category string `json:"category"`
+		MapName  string `json:"map_name"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Category == "" || req.MapName == "" {
+		resp.Fail(c, 400, "category and map_name are required")
+		return
+	}
+
+	var id int64
+	err := b.pool.QueryRow(c.Request.Context(),
+		`INSERT INTO manager_maps (category, map_name) VALUES ($1,$2)
+		 ON CONFLICT (category, map_name) DO UPDATE SET enabled=TRUE RETURNING id`,
+		req.Category, req.MapName,
+	).Scan(&id)
+	if err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	resp.OK(c, gin.H{"id": id})
+}
+
+func (b *Backend) handleUpdateMap(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		resp.Fail(c, 400, "invalid id")
+		return
+	}
+	var req struct {
+		Enabled *bool `json:"enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		resp.Fail(c, 400, "enabled is required")
+		return
+	}
+	if _, err := b.pool.Exec(c.Request.Context(),
+		`UPDATE manager_maps SET enabled=$2 WHERE id=$1`, id, *req.Enabled); err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	resp.OK(c, gin.H{"status": "ok"})
+}
+
+func (b *Backend) handleDeleteMap(c *gin.Context) {
+	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
+	if err != nil {
+		resp.Fail(c, 400, "invalid id")
+		return
+	}
+	if _, err := b.pool.Exec(c.Request.Context(), `DELETE FROM manager_maps WHERE id=$1`, id); err != nil {
+		resp.Fail(c, 500, "db error")
+		return
+	}
+	resp.OK(c, gin.H{"status": "ok"})
+}
+
+// pickRandomMap 从指定分类(手枪/步枪/狙击)的启用地图里随机选一张。
+// category为空或该分类下没有启用的地图时返回空字符串，调用方按start.sh的默认兜底处理，
+// 不当作错误中断建服流程。
+func (b *Backend) pickRandomMap(ctx context.Context, category string) string {
+	if category == "" {
+		return ""
+	}
+	var mapName string
+	err := b.pool.QueryRow(ctx,
+		`SELECT map_name FROM manager_maps WHERE category=$1 AND enabled=TRUE ORDER BY random() LIMIT 1`,
+		category,
+	).Scan(&mapName)
+	if err != nil {
+		return ""
+	}
+	return mapName
 }
 
 // ── 小程序侧数据只读查看（房间/微信用户/老玩家） ──────────────────────────────
