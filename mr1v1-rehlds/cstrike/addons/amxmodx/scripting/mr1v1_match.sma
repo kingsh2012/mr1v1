@@ -1095,6 +1095,10 @@ public Task_AnnounceMatchResult() {
 	new winnerName[32];
 	get_user_name(g_iPlayer[winner], winnerName, charsmax(winnerName));
 
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束");
+	client_print_color(0, print_team_red, "^4[1v1] ^1比赛结束");
+
 	set_hudmessage(0, 255, 0, -1.0, 0.35, 0, 6.0, 6.0);
 	client_print_color(0, print_team_grey, "^4[1v1] ^1比赛结束！%s获胜！比分%d:%d", winnerName, g_iWins[0], g_iWins[1]);
 	ShowSyncHudMsg(0, g_hudSync, "比赛结束！%s 获胜 %d:%d", winnerName, g_iWins[0], g_iWins[1]);
