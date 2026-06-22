@@ -16,19 +16,22 @@ import (
 )
 
 type Event struct {
-	Type           string `json:"type"`
-	Content        string `json:"content,omitempty"`
-	Role           string `json:"role,omitempty"`
-	Name           string `json:"name,omitempty"`
-	Avatar         string `json:"avatar,omitempty"`
-	ServerAddr     string `json:"server_addr,omitempty"`
-	MatchID        string `json:"match_id,omitempty"`
-	Message        string `json:"message,omitempty"`
+	Type       string `json:"type"`
+	Content    string `json:"content,omitempty"`
+	Role       string `json:"role,omitempty"`
+	Name       string `json:"name,omitempty"`
+	Avatar     string `json:"avatar,omitempty"`
+	ServerAddr string `json:"server_addr,omitempty"`
+	MatchID    string `json:"match_id,omitempty"`
+	Message    string `json:"message,omitempty"`
+	// 仅"score_update"/"state"事件使用：creator/joiner各自的回合胜场比分
+	ScoreCreator int `json:"score_creator,omitempty"`
+	ScoreJoiner  int `json:"score_joiner,omitempty"`
 	// 仅"state"事件使用：(re)连接时把Hub内存里的当前状态告知刚连上的客户端，
 	// 弥补WS协议本身只推送"变化"、新连接/重连进来时两眼一抹黑的问题
-	OtherOnline    bool   `json:"other_online,omitempty"`
-	OtherConfirmed bool   `json:"other_confirmed,omitempty"`
-	MyConfirmed    bool   `json:"my_confirmed,omitempty"`
+	OtherOnline    bool `json:"other_online,omitempty"`
+	OtherConfirmed bool `json:"other_confirmed,omitempty"`
+	MyConfirmed    bool `json:"my_confirmed,omitempty"`
 }
 
 type slot struct {
@@ -53,6 +56,8 @@ type Hub struct {
 	matched        bool     // 本房间是否已经成功建服(供重连客户端补发matched事件)
 	matchID        string
 	serverAddr     string
+	scoreCreator   int // 当前比分，供重连客户端补发(WS只推送变化，断线重连这段时间错过的回合需要补)
+	scoreJoiner    int
 }
 
 func newHub(roomID, backendURL, internalAPIKey string, s *store.Store, onEmpty func()) *Hub {
@@ -78,6 +83,7 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 	other := h.slots[1-idx]
 	history := append([]Event(nil), h.history...)
 	matched, matchID, serverAddr := h.matched, h.matchID, h.serverAddr
+	scoreCreator, scoreJoiner := h.scoreCreator, h.scoreJoiner
 	h.mu.Unlock()
 
 	// send chat history to reconnecting player
@@ -95,6 +101,8 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 		OtherOnline:    other != nil,
 		OtherConfirmed: other != nil && other.confirmed,
 		MyConfirmed:    false, // 每次(re)连接都会创建新slot，确认状态需要重新确认一次，这里显式回传false避免前端误用旧值
+		ScoreCreator:   scoreCreator,
+		ScoreJoiner:    scoreJoiner,
 	})
 
 	// 如果重连发生在比赛已经建好之后(原来的matched广播错过了)，直接补发一次
@@ -313,6 +321,17 @@ func (h *Hub) CloseByCreator() {
 
 // NotifyMatchEnded 由 manager-backend/consumer 同步通知触发（比赛被手动销毁/
 // 超时/异常停止/正常完赛），告知仍停留在房间页的玩家，并断开双方连接。
+// NotifyScoreUpdate 由consumer每回合结束时同步调用(经RoundUpdate handler转发)，
+// 把最新比分推给仍在房间页的双方——房间列表页本来就会轮询/api/wx/rooms拿到比分，
+// 但已经进了房间详情页(看server地址等待开打)的人看不到列表，需要WS主动推一次。
+func (h *Hub) NotifyScoreUpdate(scoreCreator, scoreJoiner int) {
+	h.mu.Lock()
+	h.scoreCreator = scoreCreator
+	h.scoreJoiner = scoreJoiner
+	h.mu.Unlock()
+	h.broadcast(Event{Type: "score_update", ScoreCreator: scoreCreator, ScoreJoiner: scoreJoiner})
+}
+
 func (h *Hub) NotifyMatchEnded(message string) {
 	h.mu.Lock()
 	s0, s1 := h.slots[0], h.slots[1]
@@ -360,8 +379,8 @@ type createMatchResp struct {
 // manager-backend 的所有响应统一包了一层 {code, data}（见 internal/resp），
 // 这里是服务间调用，需要按同样的格式解包才能拿到真实数据。
 type createMatchEnvelope struct {
-	Code int              `json:"code"`
-	Data createMatchResp  `json:"data"`
+	Code int             `json:"code"`
+	Data createMatchResp `json:"data"`
 }
 
 func (h *Hub) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr string, err error) {

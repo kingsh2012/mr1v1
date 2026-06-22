@@ -45,7 +45,7 @@ func MatchEnded(s *store.Store, mgr *room.Manager) gin.HandlerFunc {
 // RoundUpdate 接收consumer在每个回合结束(round_end)时的同步通知，更新对应房间
 // 的实时比分，让房间列表里matched状态的房间能展示当前比分。异步、不阻塞游戏流程，
 // 房间不存在(比赛不是通过小程序房间发起的)时UPDATE影响0行，静默忽略即可。
-func RoundUpdate(s *store.Store) gin.HandlerFunc {
+func RoundUpdate(s *store.Store, mgr *room.Manager) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
 			MatchID      string `json:"match_id" binding:"required"`
@@ -59,6 +59,11 @@ func RoundUpdate(s *store.Store) gin.HandlerFunc {
 		if err := s.UpdateRoomScoreByMatchID(c.Request.Context(), req.MatchID, req.ScoreCreator, req.ScoreJoiner); err != nil {
 			resp.Fail(c, 500, "db error")
 			return
+		}
+		if roomID, err := s.GetRoomIDByMatchID(c.Request.Context(), req.MatchID); err == nil && roomID != "" {
+			if hub, ok := mgr.GetIfExists(roomID); ok {
+				hub.NotifyScoreUpdate(req.ScoreCreator, req.ScoreJoiner)
+			}
 		}
 		resp.OK(c, gin.H{"ok": "1"})
 	}
