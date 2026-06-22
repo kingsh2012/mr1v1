@@ -170,9 +170,10 @@ type Room struct {
 	JoinerOpenID  string `json:"-"`
 	JoinerName    string `json:"joiner_name,omitempty"`
 	JoinerAvatar  string `json:"joiner_avatar,omitempty"`
-	Locked        bool   `json:"locked"`
-	Status        string `json:"status"`            // waiting|ready|matched
-	IsMine        bool   `json:"is_mine,omitempty"` // 仅ListRooms根据当前登录用户算出来，游客/未关联到则为false
+	Locked        bool      `json:"locked"`
+	Status        string    `json:"status"`            // waiting|ready|matched
+	IsMine        bool      `json:"is_mine,omitempty"` // 仅ListRooms根据当前登录用户算出来，游客/未关联到则为false
+	CreatedAt     time.Time `json:"created_at"`
 }
 
 func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {
@@ -197,7 +198,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		       COALESCE(r.joiner_openid,'') AS joiner_openid,
 		       COALESCE(j.nickname,'') AS joiner_name,
 		       COALESCE(j.avatar_url,'') AS joiner_avatar,
-		       r.password != '' AS locked, r.status
+		       r.password != '' AS locked, r.status, r.created_at
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
@@ -214,7 +215,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		var rm Room
 		if err := rows.Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
 			&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
-			&rm.Locked, &rm.Status); err != nil {
+			&rm.Locked, &rm.Status, &rm.CreatedAt); err != nil {
 			return nil, err
 		}
 		rooms = append(rooms, rm)
