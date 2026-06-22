@@ -44,10 +44,11 @@ var validRoomCategories = map[string]bool{"pistol": true, "rifle": true, "sniper
 func CreateRoom(s *store.Store) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		var req struct {
-			Title    string `json:"title"`
-			Password string `json:"password"`
-			Category string `json:"category"`
-			MapName  string `json:"map_name"`
+			Title       string `json:"title"`
+			Password    string `json:"password"`
+			Category    string `json:"category"`
+			MapName     string `json:"map_name"`
+			BotTestMode bool   `json:"bot_test_mode"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Title) == "" {
 			resp.Fail(c, 400, "title required")
@@ -70,7 +71,7 @@ func CreateRoom(s *store.Store) gin.HandlerFunc {
 		}
 
 		id := uuid.New().String()
-		if err := s.CreateRoom(c.Request.Context(), id, req.Title, oid, req.Password, req.Category, strings.TrimSpace(req.MapName)); err != nil {
+		if err := s.CreateRoom(c.Request.Context(), id, req.Title, oid, req.Password, req.Category, strings.TrimSpace(req.MapName), req.BotTestMode); err != nil {
 			resp.Fail(c, 500, "db error")
 			return
 		}

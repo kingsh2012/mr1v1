@@ -384,17 +384,19 @@ type createMatchEnvelope struct {
 }
 
 func (h *Hub) createMatch(p0SteamID, p1SteamID string) (matchID, serverAddr string, err error) {
-	category, mapName := "", ""
+	category, mapName, botTestMode := "", "", false
 	if rm, err := h.store.GetRoom(context.Background(), h.roomID); err == nil && rm != nil {
 		category = rm.Category
 		mapName = rm.MapName
+		botTestMode = rm.BotTestMode
 	}
 
-	body, _ := json.Marshal(map[string]string{
-		"p0_steamid": p0SteamID,
-		"p1_steamid": p1SteamID,
-		"category":   category,
-		"map_name":   mapName,
+	body, _ := json.Marshal(map[string]any{
+		"p0_steamid":    p0SteamID,
+		"p1_steamid":    p1SteamID,
+		"category":      category,
+		"map_name":      mapName,
+		"bot_test_mode": botTestMode,
 	})
 	client := &http.Client{Timeout: 15 * time.Second}
 	req, err := http.NewRequest(http.MethodPost, h.backendURL+"/api/manager/matches", bytes.NewReader(body))

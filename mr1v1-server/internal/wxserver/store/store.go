@@ -77,6 +77,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS score_joiner INT NOT NULL DEFAULT 0;
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS category TEXT NOT NULL DEFAULT 'rifle';
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS map_name TEXT NOT NULL DEFAULT '';
+		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS bot_test_mode BOOLEAN NOT NULL DEFAULT FALSE;
 		CREATE TABLE IF NOT EXISTS wx_feedback (
 			id         BIGSERIAL PRIMARY KEY,
 			openid     TEXT NOT NULL REFERENCES wx_users(openid),
@@ -197,6 +198,10 @@ type Room struct {
 	Category string `json:"category"`
 	// MapName 创建者直接指定的地图，为空表示走Category随机选图
 	MapName string `json:"map_name,omitempty"`
+	// BotTestMode 仅供端到端测试用：双方slot由2个游戏内Bot顶替，无需真实玩家连入
+	// 即可走完一整局比赛，验证回合/比分上报链路。不在小程序UI暴露，正式排位赛
+	// 不会用到。
+	BotTestMode bool `json:"bot_test_mode,omitempty"`
 }
 
 func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {
@@ -207,10 +212,10 @@ func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) 
 	return count > 0, err
 }
 
-func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, password, category, mapName string) error {
+func (s *Store) CreateRoom(ctx context.Context, id, title, creatorOpenID, password, category, mapName string, botTestMode bool) error {
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO wx_rooms (id, title, creator_openid, password, category, map_name) VALUES ($1, $2, $3, $4, $5, $6)
-	`, id, title, creatorOpenID, password, category, mapName)
+		INSERT INTO wx_rooms (id, title, creator_openid, password, category, map_name, bot_test_mode) VALUES ($1, $2, $3, $4, $5, $6, $7)
+	`, id, title, creatorOpenID, password, category, mapName, botTestMode)
 	return err
 }
 
@@ -304,14 +309,14 @@ func (s *Store) GetRoom(ctx context.Context, id string) (*Room, error) {
 		       COALESCE(u.avatar_url,''),
 		       COALESCE(r.joiner_openid,''), COALESCE(j.nickname,''),
 		       COALESCE(j.avatar_url,''),
-		       r.password, r.status, r.category, r.map_name
+		       r.password, r.status, r.category, r.map_name, r.bot_test_mode
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
 		WHERE r.id = $1 AND r.deleted_at IS NULL
 	`, id).Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
 		&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
-		&password, &rm.Status, &rm.Category, &rm.MapName)
+		&password, &rm.Status, &rm.Category, &rm.MapName, &rm.BotTestMode)
 	if err == pgx.ErrNoRows {
 		return nil, nil
 	}
