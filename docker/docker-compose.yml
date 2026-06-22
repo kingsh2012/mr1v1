@@ -20,7 +20,7 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
   mr1v1-miniprogram-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.21
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.23
     container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
