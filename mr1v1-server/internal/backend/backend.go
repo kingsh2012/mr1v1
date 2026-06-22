@@ -61,6 +61,10 @@ func New(cfg *config.BackendConfig) (*Backend, error) {
 			return nil, fmt.Errorf("migrate backend tables: %w\nSQL: %s", err, stmt[:min(len(stmt), 80)])
 		}
 	}
+	if err := seedDefaultMaps(context.Background(), pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("seed default maps: %w", err)
+	}
 
 	opts := mqtt.NewClientOptions().
 		AddBroker(cfg.MQTT.Broker).
@@ -845,6 +849,32 @@ func (b *Backend) handleActivateRehldsConfig(c *gin.Context) {
 }
 
 // ── 地图池（捡枪式赛制按手枪/步枪/狙击分类，建服时按category随机选图） ──────────
+
+// defaultMaps 是已验证的初始地图池（实测hlds_linux启动无wad/纹理缺失警告），
+// 程序启动时自动写入，避免每次重新部署都要手动调API录入。
+// aim_sk_glock/aim_sk_aug_sig/aim_sk_galil_famas本机找不到地图文件，暂未收录。
+var defaultMaps = []struct{ category, mapName string }{
+	{"pistol", "aim_sk_usp_deagle"},
+	{"pistol", "aim_usp"},
+	{"rifle", "aim_sk_ak_m4"},
+	{"rifle", "ak47_m4a1_dust"},
+	{"rifle", "aim_map"},
+	{"rifle", "aim_qpad_2007"},
+	{"sniper", "aim_sk_awp"},
+	{"sniper", "awp_map_32"},
+}
+
+func seedDefaultMaps(ctx context.Context, pool *pgxpool.Pool) error {
+	for _, m := range defaultMaps {
+		if _, err := pool.Exec(ctx, `
+			INSERT INTO manager_maps (category, map_name) VALUES ($1, $2)
+			ON CONFLICT (category, map_name) DO NOTHING
+		`, m.category, m.mapName); err != nil {
+			return err
+		}
+	}
+	return nil
+}
 
 type mapRow struct {
 	ID        int64     `json:"id"`
