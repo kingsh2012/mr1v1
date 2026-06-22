@@ -118,6 +118,38 @@ func (c *Consumer) notifyWxMatchEnded(matchID, state string) {
 	}()
 }
 
+// notifyWxRoundUpdate 每个回合结束时同步通知 wxserver 更新房间的实时比分
+// （如果该比赛是通过小程序房间发起的）。wins0/wins1对应建服时p0/p1的顺序，
+// 也就是房主/加入者的回合胜场。异步、失败只记日志，不影响主流程。
+func (c *Consumer) notifyWxRoundUpdate(matchID string, wins0, wins1 int) {
+	if c.cfg.WxBackendURL == "" {
+		return
+	}
+	go func() {
+		body, _ := json.Marshal(map[string]any{
+			"match_id":      matchID,
+			"score_creator": wins0,
+			"score_joiner":  wins1,
+		})
+		req, err := http.NewRequest(http.MethodPost, c.cfg.WxBackendURL+"/api/wx/internal/round-update", bytes.NewReader(body))
+		if err != nil {
+			slog.Warn("build notify wx round-update request failed", "match_id", matchID, "error", err)
+			return
+		}
+		req.Header.Set("Content-Type", "application/json")
+		if c.cfg.InternalAPIKey != "" {
+			req.Header.Set("X-API-Key", c.cfg.InternalAPIKey)
+		}
+		client := &http.Client{Timeout: 5 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			slog.Warn("notify wx round-update failed", "match_id", matchID, "error", err)
+			return
+		}
+		defer resp.Body.Close()
+	}()
+}
+
 func (c *Consumer) onMessage(_ mqtt.Client, msg mqtt.Message) {
 	var env envelope.Envelope
 	if err := json.Unmarshal(msg.Payload(), &env); err != nil {
@@ -179,6 +211,9 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			d.P0Damage, d.P0Hits, d.P1Damage, d.P1Hits,
 			env.Timestamp,
 		)
+		if err == nil {
+			c.notifyWxRoundUpdate(d.MatchID, d.Wins0, d.Wins1)
+		}
 		return err
 
 	case envelope.TypeMatchEnd:
@@ -207,6 +242,7 @@ func (c *Consumer) handle(env envelope.Envelope) error {
 			return err
 		}
 		if tag.RowsAffected() > 0 {
+			c.notifyWxRoundUpdate(d.MatchID, d.Wins0, d.Wins1)
 			c.notifyWxMatchEnded(d.MatchID, "finished")
 		}
 		_, err = c.pool.Exec(ctx,

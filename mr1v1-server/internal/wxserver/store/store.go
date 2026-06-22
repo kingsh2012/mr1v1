@@ -73,6 +73,8 @@ func (s *Store) Migrate(ctx context.Context) error {
 		);
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
+		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS score_creator INT NOT NULL DEFAULT 0;
+		ALTER TABLE wx_rooms ADD COLUMN IF NOT EXISTS score_joiner INT NOT NULL DEFAULT 0;
 	`)
 	return err
 }
@@ -171,9 +173,11 @@ type Room struct {
 	JoinerName    string `json:"joiner_name,omitempty"`
 	JoinerAvatar  string `json:"joiner_avatar,omitempty"`
 	Locked        bool      `json:"locked"`
-	Status        string    `json:"status"`            // waiting|ready|matched
+	Status        string    `json:"status"`            // waiting|ready|matched|completed
 	IsMine        bool      `json:"is_mine,omitempty"` // 仅ListRooms根据当前登录用户算出来，游客/未关联到则为false
 	CreatedAt     time.Time `json:"created_at"`
+	ScoreCreator  int       `json:"score_creator"`
+	ScoreJoiner   int       `json:"score_joiner"`
 }
 
 func (s *Store) HasActiveRoom(ctx context.Context, openid string) (bool, error) {
@@ -198,12 +202,14 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		       COALESCE(r.joiner_openid,'') AS joiner_openid,
 		       COALESCE(j.nickname,'') AS joiner_name,
 		       COALESCE(j.avatar_url,'') AS joiner_avatar,
-		       r.password != '' AS locked, r.status, r.created_at
+		       r.password != '' AS locked, r.status, r.created_at, r.score_creator, r.score_joiner
 		FROM wx_rooms r
 		JOIN wx_users u ON u.openid = r.creator_openid
 		LEFT JOIN wx_users j ON j.openid = r.joiner_openid
-		WHERE r.status IN ('waiting','ready') AND r.deleted_at IS NULL
-		ORDER BY r.created_at DESC
+		WHERE r.status IN ('waiting','ready','matched','completed') AND r.deleted_at IS NULL
+		ORDER BY
+			CASE r.status WHEN 'waiting' THEN 0 WHEN 'ready' THEN 0 WHEN 'matched' THEN 1 WHEN 'completed' THEN 2 ELSE 3 END,
+			r.created_at DESC
 		LIMIT 50
 	`)
 	if err != nil {
@@ -215,7 +221,7 @@ func (s *Store) ListRooms(ctx context.Context) ([]Room, error) {
 		var rm Room
 		if err := rows.Scan(&rm.ID, &rm.Title, &rm.CreatorOpenID, &rm.CreatorName,
 			&rm.CreatorAvatar, &rm.JoinerOpenID, &rm.JoinerName, &rm.JoinerAvatar,
-			&rm.Locked, &rm.Status, &rm.CreatedAt); err != nil {
+			&rm.Locked, &rm.Status, &rm.CreatedAt, &rm.ScoreCreator, &rm.ScoreJoiner); err != nil {
 			return nil, err
 		}
 		rooms = append(rooms, rm)
@@ -306,6 +312,26 @@ func (s *Store) SetRoomMatched(ctx context.Context, id, matchID, serverAddr stri
 
 func (s *Store) DeleteRoom(ctx context.Context, id string) error {
 	_, err := s.pool.Exec(ctx, `UPDATE wx_rooms SET deleted_at = now(), updated_at = now() WHERE id = $1`, id)
+	return err
+}
+
+// UpdateRoomScoreByMatchID 由consumer在每个回合结束(round_end)时同步调用，
+// 让房间列表里matched状态的房间能实时显示当前比分。按match_id定位房间，
+// 房间不存在(比赛不是通过小程序房间发起的)时静默忽略。
+func (s *Store) UpdateRoomScoreByMatchID(ctx context.Context, matchID string, scoreCreator, scoreJoiner int) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE wx_rooms SET score_creator = $2, score_joiner = $3, updated_at = now()
+		WHERE match_id = $1 AND deleted_at IS NULL
+	`, matchID, scoreCreator, scoreJoiner)
+	return err
+}
+
+// CompleteRoom 比赛正常/异常结束时调用，房间状态改为completed并一直留在列表里
+// 展示最终比分（不像DeleteRoom一样软删除/从列表消失）。
+func (s *Store) CompleteRoom(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE wx_rooms SET status = 'completed', updated_at = now() WHERE id = $1 AND deleted_at IS NULL
+	`, id)
 	return err
 }
 

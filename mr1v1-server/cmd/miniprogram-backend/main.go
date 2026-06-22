@@ -66,6 +66,7 @@ func main() {
 
 	internal := r.Group("/api/wx/internal", handlers.InternalAuth(cfg.InternalAPIKey))
 	internal.POST("/match-ended", handlers.MatchEnded(s, mgr))
+	internal.POST("/round-update", handlers.RoundUpdate(s))
 
 	slog.Info("mr1v1-wx listening", "addr", ":"+cfg.Port, "backend", cfg.BackendURL)
 	if err := r.Run(":" + cfg.Port); err != nil {
