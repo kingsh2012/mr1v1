@@ -670,19 +670,31 @@ type agentRow struct {
 	Status       string    `json:"status"`
 	RehldsRunMax int       `json:"rehlds_run_max"`
 	PortRange    string    `json:"rehlds_port_range"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
-	HeartbeatAt  time.Time `json:"heartbeat_at"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+	HeartbeatAt       time.Time `json:"heartbeat_at"`
+	RunningContainers string    `json:"running_containers"`
 }
+
+// 比赛容器实际存活的状态：creating(正在拉起)/waiting(等待双方确认)/playing(对局中)，
+// 其余(finished/terminated/timeout/error)容器已销毁，不算"运行中"
+var runningMatchStates = []string{"creating", "waiting", "playing"}
 
 func (b *Backend) handleListAgents(c *gin.Context) {
 	rows, err := b.pool.Query(c.Request.Context(), `
-		SELECT uuid, hostname, public_ip, local_ip, cpu, mem_mb, disk_gb,
-		       status, rehlds_run_max, rehlds_port_range,
-		       created_at, updated_at, heartbeat_at
-		FROM manager_agents
-		ORDER BY heartbeat_at DESC
-	`)
+		SELECT a.uuid, a.hostname, a.public_ip, a.local_ip, a.cpu, a.mem_mb, a.disk_gb,
+		       a.status, a.rehlds_run_max, a.rehlds_port_range,
+		       a.created_at, a.updated_at, a.heartbeat_at,
+		       COALESCE(m.running, '') AS running_containers
+		FROM manager_agents a
+		LEFT JOIN (
+			SELECT agent_uuid, string_agg(match_id, ',') AS running
+			FROM manager_matches
+			WHERE state = ANY($1)
+			GROUP BY agent_uuid
+		) m ON m.agent_uuid = a.uuid
+		ORDER BY a.heartbeat_at DESC
+	`, runningMatchStates)
 	if err != nil {
 		resp.Fail(c, 500, "db error")
 		return
@@ -695,7 +707,7 @@ func (b *Backend) handleListAgents(c *gin.Context) {
 		if err := rows.Scan(&a.UUID, &a.Hostname, &a.PublicIP, &a.LocalIP,
 			&a.CPU, &a.MemMB, &a.DiskGB, &a.Status,
 			&a.RehldsRunMax, &a.PortRange,
-			&a.CreatedAt, &a.UpdatedAt, &a.HeartbeatAt); err != nil {
+			&a.CreatedAt, &a.UpdatedAt, &a.HeartbeatAt, &a.RunningContainers); err != nil {
 			continue
 		}
 		result = append(result, a)
