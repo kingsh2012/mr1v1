@@ -50,6 +50,7 @@ func main() {
 	// 随机昵称+头像预览("骰子"按钮用)和头像图片本身都不需要登录，纯生成/渲染，不读用户数据
 	wx.GET("/random-profile", handlers.RandomProfile(cfg))
 	wx.GET("/identicon/:seed", handlers.Identicon)
+	wx.GET("/maps", handlers.ListMaps(cfg))
 
 	auth := wx.Group("", handlers.Auth(s))
 	auth.GET("/user", handlers.GetUser(s))

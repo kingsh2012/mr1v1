@@ -271,6 +271,9 @@ type createMatchRequest struct {
 	ServerName string `json:"server_name"`
 	// Category 手枪/步枪/狙击，决定从哪个地图池随机选图；为空则不指定地图(走容器默认兜底)
 	Category string `json:"category,omitempty"`
+	// MapName 玩家创建房间时直接指定的地图，优先级高于Category——给了就直接用，
+	// 不再随机选；为空才走Category随机选图的逻辑
+	MapName string `json:"map_name,omitempty"`
 	// BotTestMode 仅供端到端测试使用，见 agentproto.CreateCommand.BotTestMode。
 	BotTestMode bool `json:"bot_test_mode,omitempty"`
 }
@@ -319,7 +322,10 @@ func (b *Backend) handleCreateMatch(c *gin.Context) {
 		serverName = fmt.Sprintf("mr1v1 1v1 #%s", matchID[:8])
 	}
 
-	mapName := b.pickRandomMap(ctx, req.Category)
+	mapName := req.MapName
+	if mapName == "" {
+		mapName = b.pickRandomMap(ctx, req.Category)
+	}
 
 	cmd := agentproto.CreateCommand{
 		MatchID:     matchID,

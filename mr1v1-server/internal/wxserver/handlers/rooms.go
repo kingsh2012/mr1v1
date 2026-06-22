@@ -47,6 +47,7 @@ func CreateRoom(s *store.Store) gin.HandlerFunc {
 			Title    string `json:"title"`
 			Password string `json:"password"`
 			Category string `json:"category"`
+			MapName  string `json:"map_name"`
 		}
 		if err := c.ShouldBindJSON(&req); err != nil || strings.TrimSpace(req.Title) == "" {
 			resp.Fail(c, 400, "title required")
@@ -69,7 +70,7 @@ func CreateRoom(s *store.Store) gin.HandlerFunc {
 		}
 
 		id := uuid.New().String()
-		if err := s.CreateRoom(c.Request.Context(), id, req.Title, oid, req.Password, req.Category); err != nil {
+		if err := s.CreateRoom(c.Request.Context(), id, req.Title, oid, req.Password, req.Category, strings.TrimSpace(req.MapName)); err != nil {
 			resp.Fail(c, 500, "db error")
 			return
 		}
