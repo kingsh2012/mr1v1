@@ -1,6 +1,6 @@
 services:
   mr1v1-agent:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent:0.1.8
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent:0.1.9
     container_name: mr1v1-agent
     restart: unless-stopped
     network_mode: host
