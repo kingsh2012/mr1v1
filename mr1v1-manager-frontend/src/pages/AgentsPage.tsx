@@ -323,17 +323,15 @@ export default function AgentsPage() {
         <Tag color={v === 'enabled' ? 'blue' : 'red'}>{v === 'enabled' ? '可调度' : '禁用'}</Tag>
       ),
     },
-    { title: 'REHLDS最大并发', dataIndex: 'rehlds_run_max', key: 'rehlds_run_max' },
     { title: 'REHLDS端口范围', dataIndex: 'rehlds_port_range', key: 'rehlds_port_range' },
     {
-      title: '运行中容器',
-      dataIndex: 'running_containers',
-      key: 'running_containers',
-      render: (v: string) => v
-        ? v.split(',').map(id => (
-            <Tag key={id} color="blue" style={{ marginBottom: 2 }}>{id.slice(0, 8)}</Tag>
-          ))
-        : <Text type="secondary">无</Text>,
+      title: '运行负载',
+      key: 'load',
+      render: (_: unknown, r: Agent) => {
+        const running = r.running_containers ? r.running_containers.split(',').filter(Boolean).length : 0
+        const full = r.rehlds_run_max > 0 && running >= r.rehlds_run_max
+        return <Tag color={full ? 'red' : running > 0 ? 'blue' : 'default'}>{running} / {r.rehlds_run_max}</Tag>
+      },
     },
     {
       title: '创建时间',
