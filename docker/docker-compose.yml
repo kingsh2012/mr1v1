@@ -1,6 +1,6 @@
 services:
   mr1v1-consumer:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.9
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-consumer:0.1.10
     container_name: mr1v1-consumer
     restart: unless-stopped
     network_mode: host
@@ -20,7 +20,7 @@ services:
       - INTERNAL_API_KEY=${INTERNAL_API_KEY}
 
   mr1v1-miniprogram-backend:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.17
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-miniprogram-backend:0.1.18
     container_name: mr1v1-miniprogram-backend
     restart: unless-stopped
     network_mode: host
