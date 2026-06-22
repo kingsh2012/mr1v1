@@ -1,6 +1,6 @@
 services:
   mr1v1-agent:
-    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent:0.1.7
+    image: registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-agent:0.1.8
     container_name: mr1v1-agent
     restart: unless-stopped
     network_mode: host
@@ -17,4 +17,4 @@ services:
       - DOCKER_STOP_TIMEOUT=15
       - DESTROY_COMMAND=mr1v1_match_destroy
       - DESTROY_COUNTDOWN=5
-      - DOCKER_IMAGE=registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.2.12
+      - DOCKER_IMAGE=registry.cn-beijing.aliyuncs.com/kingsh2012/mr1v1-rehlds:v0.3.0
