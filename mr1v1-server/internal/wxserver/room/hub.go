@@ -29,9 +29,11 @@ type Event struct {
 	ScoreJoiner  int `json:"score_joiner,omitempty"`
 	// 仅"state"事件使用：(re)连接时把Hub内存里的当前状态告知刚连上的客户端，
 	// 弥补WS协议本身只推送"变化"、新连接/重连进来时两眼一抹黑的问题
-	OtherOnline    bool `json:"other_online,omitempty"`
-	OtherConfirmed bool `json:"other_confirmed,omitempty"`
-	MyConfirmed    bool `json:"my_confirmed,omitempty"`
+	OtherOnline    bool   `json:"other_online,omitempty"`
+	OtherConfirmed bool   `json:"other_confirmed,omitempty"`
+	MyConfirmed    bool   `json:"my_confirmed,omitempty"`
+	OtherName      string `json:"other_name,omitempty"`
+	OtherAvatar    string `json:"other_avatar,omitempty"`
 }
 
 type slot struct {
@@ -96,6 +98,10 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 
 	// (重)连接时把当前已知状态告知这个客户端本身——WS协议本身只推送"变化"，
 	// 新连接/掉线重连进来时两眼一抹黑，靠这条把对手在线/确认状态补回去
+	otherName, otherAvatar := "", ""
+	if other != nil {
+		otherName, otherAvatar = other.name, other.avatar
+	}
 	h.send(conn, Event{
 		Type:           "state",
 		OtherOnline:    other != nil,
@@ -103,6 +109,8 @@ func (h *Hub) Connect(conn *websocket.Conn, openid, name, avatar, steamID, role 
 		MyConfirmed:    false, // 每次(re)连接都会创建新slot，确认状态需要重新确认一次，这里显式回传false避免前端误用旧值
 		ScoreCreator:   scoreCreator,
 		ScoreJoiner:    scoreJoiner,
+		OtherName:      otherName,
+		OtherAvatar:    otherAvatar,
 	})
 
 	// 如果重连发生在比赛已经建好之后(原来的matched广播错过了)，直接补发一次
