@@ -55,6 +55,7 @@ type Hub struct {
 	slots          [2]*slot // 0=creator, 1=joiner
 	history        []Event  // chat history
 	onEmpty        func()   // called when both slots are disconnected
+	matching       bool     // 建服请求是否正在路上，防止双方几乎同时确认时并发触发两次triggerMatch
 	matched        bool     // 本房间是否已经成功建服(供重连客户端补发matched事件)
 	matchID        string
 	serverAddr     string
@@ -227,17 +228,24 @@ func (h *Hub) handleConfirm(idx int, openid, name, steamID, role string) {
 	}
 	creator := h.slots[0]
 	joiner := h.slots[1]
-	h.mu.Unlock()
-
-	h.mu.Lock()
 	myAvatar := ""
 	if h.slots[idx] != nil {
 		myAvatar = h.slots[idx].avatar
 	}
+	// 双方confirmed的判断和"占用建服中标记"必须在同一把锁里原子完成，
+	// 否则双方几乎同时确认/重试时，两个连接的读循环goroutine可能都读到"双方已确认"，
+	// 并发各自调一次triggerMatch——其中一次失败重置确认状态后，另一次还在用旧状态走流程，
+	// 就会出现"房主单独点一下就建服成功"但前端显示对方未确认的状态错乱
+	shouldTrigger := false
+	if creator != nil && joiner != nil && creator.confirmed && joiner.confirmed && !h.matching {
+		h.matching = true
+		shouldTrigger = true
+	}
 	h.mu.Unlock()
+
 	h.broadcast(Event{Type: "confirmed", Role: role, Name: name, Avatar: myAvatar})
 
-	if creator != nil && joiner != nil && creator.confirmed && joiner.confirmed {
+	if shouldTrigger {
 		h.triggerMatch(creator, joiner)
 	}
 }
@@ -291,12 +299,14 @@ func (h *Hub) triggerMatch(creator, joiner *slot) {
 		if h.slots[1] != nil {
 			h.slots[1].confirmed = false
 		}
+		h.matching = false
 		h.mu.Unlock()
 		return
 	}
 
 	h.mu.Lock()
 	h.matched = true
+	h.matching = false
 	h.matchID = matchID
 	h.serverAddr = serverAddr
 	h.mu.Unlock()

@@ -38,6 +38,19 @@ func BindLegacyPlayer(s *store.Store) gin.HandlerFunc {
 			resp.Fail(c, 500, "db error")
 			return
 		}
-		resp.OK(c, gin.H{"steam_id": req.SteamID})
+		// 老玩家身份本来就是按SteamID找回来的，连带把legacy_players里的name/weixin_photo
+		// 同步成微信这边的昵称/头像——weixin_photo是老5v5平台同步过来的微信头像地址，
+		// 个别老记录可能没采集到，没有的话只同步昵称，前端按新昵称兜底生成identicon
+		nickname, avatarURL := "", ""
+		if lp, err := s.GetLegacyPlayerByID(c.Request.Context(), req.SteamID); err == nil && lp != nil {
+			nickname = lp.Name
+			avatarURL = lp.WeixinPhoto
+			if avatarURL != "" {
+				_ = s.UpdateProfile(c.Request.Context(), openid(c), avatarURL, nickname)
+			} else {
+				_ = s.UpdateNickname(c.Request.Context(), openid(c), nickname)
+			}
+		}
+		resp.OK(c, gin.H{"steam_id": req.SteamID, "nickname": nickname, "avatar_url": avatarURL})
 	}
 }

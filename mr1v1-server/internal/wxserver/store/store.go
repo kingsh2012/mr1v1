@@ -25,8 +25,9 @@ type User struct {
 }
 
 type LegacyPlayer struct {
-	SteamID string `json:"steam_id"`
-	Name    string `json:"name"`
+	SteamID     string `json:"steam_id"`
+	Name        string `json:"name"`
+	WeixinPhoto string `json:"weixin_photo"`
 }
 
 type Store struct {
@@ -174,6 +175,15 @@ func (s *Store) UpdateProfile(ctx context.Context, openid, avatarURL, nickname s
 	_, err := s.pool.Exec(ctx, `
 		UPDATE wx_users SET avatar_url = $2, nickname = $3, updated_at = now() WHERE openid = $1
 	`, openid, avatarURL, nickname)
+	return err
+}
+
+// UpdateNickname 单独改昵称，不动avatar_url——绑定老玩家时只有name可同步，没有头像数据，
+// 不能像UpdateProfile那样把avatar_url一起覆盖成空
+func (s *Store) UpdateNickname(ctx context.Context, openid, nickname string) error {
+	_, err := s.pool.Exec(ctx, `
+		UPDATE wx_users SET nickname = $2, updated_at = now() WHERE openid = $1
+	`, openid, nickname)
 	return err
 }
 
@@ -443,7 +453,7 @@ func (s *Store) StaleRoomIDs(ctx context.Context, idleFor time.Duration) ([]stri
 
 func (s *Store) SearchLegacyPlayers(ctx context.Context, keyword string) ([]LegacyPlayer, error) {
 	rows, err := s.pool.Query(ctx, `
-		SELECT steam_id, name FROM legacy_players
+		SELECT steam_id, name, weixin_photo FROM legacy_players
 		WHERE name ILIKE '%' || $1 || '%'
 		ORDER BY name
 		LIMIT 20
@@ -456,10 +466,25 @@ func (s *Store) SearchLegacyPlayers(ctx context.Context, keyword string) ([]Lega
 	var players []LegacyPlayer
 	for rows.Next() {
 		var p LegacyPlayer
-		if err := rows.Scan(&p.SteamID, &p.Name); err != nil {
+		if err := rows.Scan(&p.SteamID, &p.Name, &p.WeixinPhoto); err != nil {
 			return nil, err
 		}
 		players = append(players, p)
 	}
 	return players, rows.Err()
+}
+
+// GetLegacyPlayerByID 绑定老玩家时按SteamID查回name+weixin_photo，同步进wx_users的
+// nickname/avatar_url——weixin_photo是legacy/sync.go从老5v5平台同步过来的微信头像地址
+func (s *Store) GetLegacyPlayerByID(ctx context.Context, steamID string) (*LegacyPlayer, error) {
+	var p LegacyPlayer
+	err := s.pool.QueryRow(ctx, `SELECT steam_id, name, weixin_photo FROM legacy_players WHERE steam_id = $1`, steamID).
+		Scan(&p.SteamID, &p.Name, &p.WeixinPhoto)
+	if err == pgx.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &p, nil
 }
