@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"errors"
+
 	"github.com/gin-gonic/gin"
 	"mr1v1-server/internal/resp"
 	"mr1v1-server/internal/wxserver/store"
@@ -35,6 +37,10 @@ func BindLegacyPlayer(s *store.Store) gin.HandlerFunc {
 			return
 		}
 		if err := s.UpdateSteamID(c.Request.Context(), openid(c), req.SteamID); err != nil {
+			if errors.Is(err, store.ErrSteamIDTaken) {
+				resp.Fail(c, 409, "steam_id_taken")
+				return
+			}
 			resp.Fail(c, 500, "db error")
 			return
 		}

@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -43,6 +44,10 @@ func UpdateSteamID(s *store.Store) gin.HandlerFunc {
 			return
 		}
 		if err := s.UpdateSteamID(c.Request.Context(), openid(c), req.SteamID); err != nil {
+			if errors.Is(err, store.ErrSteamIDTaken) {
+				resp.Fail(c, 409, "steam_id_taken")
+				return
+			}
 			resp.Fail(c, 500, "db error")
 			return
 		}

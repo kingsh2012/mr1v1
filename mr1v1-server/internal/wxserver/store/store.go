@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"mr1v1-server/internal/wxserver/namegen"
 )
@@ -14,6 +15,9 @@ import (
 // JoinRoom 的 UPDATE 靠 WHERE 条件保证数据库层面只有一个并发请求能真正生效，
 // 但调用方必须检查 RowsAffected，否则没抢到的请求会被误判成功。
 var ErrRoomNotJoinable = errors.New("room not joinable")
+
+// ErrSteamIDTaken 表示该 SteamID 已被其他微信用户绑定（唯一约束冲突）。
+var ErrSteamIDTaken = errors.New("steam_id taken")
 
 type User struct {
 	OpenID    string
@@ -54,6 +58,7 @@ func (s *Store) Migrate(ctx context.Context) error {
 			updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 		);
 		ALTER TABLE wx_users ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'enabled';
+		CREATE UNIQUE INDEX IF NOT EXISTS wx_users_steam_id_unique ON wx_users(steam_id) WHERE steam_id <> '';
 		CREATE TABLE IF NOT EXISTS wx_sessions (
 			token      TEXT PRIMARY KEY,
 			openid     TEXT NOT NULL REFERENCES wx_users(openid) ON DELETE CASCADE,
@@ -168,7 +173,14 @@ func (s *Store) UpdateSteamID(ctx context.Context, openid, steamID string) error
 	_, err := s.pool.Exec(ctx, `
 		UPDATE wx_users SET steam_id = $2, updated_at = now() WHERE openid = $1
 	`, openid, steamID)
-	return err
+	if err != nil {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return ErrSteamIDTaken
+		}
+		return err
+	}
+	return nil
 }
 
 func (s *Store) UpdateProfile(ctx context.Context, openid, avatarURL, nickname string) error {
